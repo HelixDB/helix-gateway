@@ -1,3 +1,9 @@
+//! Serialization format abstraction.
+//!
+//! Provides a unified interface for serializing and deserializing request/response
+//! bodies. Currently supports JSON via sonic-rs, but the abstraction allows adding
+//! other formats (e.g., MessagePack, CBOR) without changing handler code.
+
 use std::borrow::Cow;
 
 use eyre::Result;
@@ -6,6 +12,7 @@ use tokio::io::{AsyncWrite, AsyncWriteExt, BufWriter};
 
 use crate::utils::MaybeOwned;
 
+/// Supported serialization formats.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub enum Format {
     #[default]
@@ -24,6 +31,7 @@ impl std::str::FromStr for Format {
 }
 
 impl Format {
+    /// Returns the MIME content type for this format.
     pub fn content_type(self) -> &'static str {
         match self {
             Format::Json => "application/json",

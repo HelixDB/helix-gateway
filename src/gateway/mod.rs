@@ -1,3 +1,5 @@
+//! Gateway server initialization and lifecycle management.
+
 use std::time::Duration;
 
 use crate::{
@@ -16,6 +18,21 @@ pub mod routes;
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+/// Starts the gateway server.
+///
+/// This function:
+/// 1. Initializes tracing with environment-based log filtering
+/// 2. Loads configuration from environment variables
+/// 3. Connects to the gRPC backend service
+/// 4. Configures middleware (timeout, request tracing)
+/// 5. Binds to the configured address and serves HTTP requests
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The gRPC backend connection fails
+/// - The TCP listener cannot bind to the configured address
+/// - The server encounters a fatal error while running
 pub async fn run() -> eyre::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(

@@ -1,9 +1,15 @@
+//! Error types and HTTP response conversion.
+//!
+//! All errors are automatically converted to appropriate HTTP responses
+//! with JSON error bodies.
+
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::Serialize;
 use thiserror::Error;
 
+/// Gateway error types with automatic HTTP status code mapping.
 #[derive(Error, Debug)]
 pub enum GatewayError {
     #[error("parse error: {0}")]

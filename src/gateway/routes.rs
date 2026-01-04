@@ -1,3 +1,8 @@
+//! HTTP route handlers and application state.
+//!
+//! This module defines the HTTP API surface of the gateway, translating
+//! incoming requests to gRPC calls and formatting responses.
+
 use axum::{
     extract::State,
     http::StatusCode,
@@ -17,6 +22,7 @@ use crate::{
     },
 };
 
+/// Shared application state available to all request handlers.
 #[derive(Clone)]
 pub struct AppState {
     config: Config,
@@ -44,6 +50,7 @@ impl AppState {
     }
 }
 
+/// Creates the router with all gateway endpoints.
 pub fn create_router() -> Router<AppState> {
     Router::new()
         .route("/query", post(handle_query))
@@ -51,6 +58,7 @@ pub fn create_router() -> Router<AppState> {
         .route("/mcp", post(handle_mcp))
 }
 
+/// Handles `POST /query` requests by forwarding to the backend Query RPC.
 pub async fn handle_query(
     State(state): State<AppState>,
     body: Bytes,
@@ -80,6 +88,7 @@ pub async fn handle_query(
     ))
 }
 
+/// Handles `GET /health` requests by checking backend health.
 pub async fn handle_health(
     State(mut state): State<AppState>,
 ) -> Result<Json<HealthResponse>, GatewayError> {
@@ -96,6 +105,7 @@ pub async fn handle_health(
     }))
 }
 
+/// Handles `POST /mcp` requests for Model Context Protocol operations.
 pub async fn handle_mcp(
     State(state): State<AppState>,
     body: Bytes,

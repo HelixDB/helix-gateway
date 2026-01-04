@@ -1,5 +1,17 @@
+//! Gateway configuration loaded from environment variables.
+
 use std::net::SocketAddr;
 
+/// Server configuration.
+///
+/// Load from environment with [`Config::from_env`], or use [`Config::default`]
+/// for development defaults.
+///
+/// # Environment Variables
+///
+/// - `LISTEN_ADDR` - HTTP server bind address (default: `0.0.0.0:8080`)
+/// - `BACKEND_ADDR` - gRPC backend URL (default: `http://127.0.0.1:50051`)
+/// - `REQUEST_TIMEOUT_MS` - Request timeout in milliseconds (default: `30000`)
 #[derive(Clone)]
 pub struct Config {
     pub listen_addr: SocketAddr,
@@ -20,6 +32,7 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Loads configuration from environment variables, falling back to defaults.
     pub fn from_env() -> Self {
         Self {
             listen_addr: std::env::var("LISTEN_ADDR")
