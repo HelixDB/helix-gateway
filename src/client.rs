@@ -36,3 +36,35 @@ impl ProtoClient {
         self.client.clone()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_connect_invalid_uri_scheme() {
+        // Invalid URI without scheme should fail
+        let result = ProtoClient::connect("invalid-uri-no-scheme").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_connect_empty_address() {
+        let result = ProtoClient::connect("").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_connect_malformed_uri() {
+        let result = ProtoClient::connect("://malformed").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_connect_unreachable_host() {
+        // This should fail to connect but the URI parsing should succeed
+        let result = ProtoClient::connect("http://127.0.0.1:1").await;
+        // Connection to port 1 should fail (nothing listening there)
+        assert!(result.is_err());
+    }
+}

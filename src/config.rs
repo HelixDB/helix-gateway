@@ -48,3 +48,42 @@ impl Config {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_config_default_listen_addr() {
+        let config = Config::default();
+        assert_eq!(config.listen_addr.to_string(), "0.0.0.0:8080");
+    }
+
+    #[test]
+    fn test_config_default_backend_addr() {
+        let config = Config::default();
+        assert_eq!(config.backend_addr, "http://127.0.0.1:50051");
+    }
+
+    #[test]
+    fn test_config_default_timeout() {
+        let config = Config::default();
+        assert_eq!(config.request_timeout_ms, 30_000);
+    }
+
+    #[test]
+    fn test_config_clone() {
+        let config = Config::default();
+        let cloned = config.clone();
+        assert_eq!(config.listen_addr, cloned.listen_addr);
+        assert_eq!(config.backend_addr, cloned.backend_addr);
+        assert_eq!(config.request_timeout_ms, cloned.request_timeout_ms);
+    }
+
+    #[test]
+    fn test_config_listen_addr_is_socket_addr() {
+        let config = Config::default();
+        assert_eq!(config.listen_addr.port(), 8080);
+        assert!(config.listen_addr.ip().is_unspecified());
+    }
+}

@@ -24,6 +24,11 @@ tonic-prost = "*"
 tonic-prost-build = "0.14"
 prost-build = "0.14"
 
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+tokio-stream = "0.1"
+
 
 [profile.release]
 opt-level = 2
