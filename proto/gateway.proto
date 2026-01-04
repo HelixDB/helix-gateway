@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package gateway;
+
+service BackendService {
+  rpc Query(QueryRequest) returns (QueryResponse);
+  rpc Health(HealthRequest) returns (HealthResponse);
+  rpc Mcp(McpRequest) returns (McpResponse);
+}
+
+message QueryRequest {
+  string query = 1;
+  map<string, string> parameters = 2;
+}
+
+message QueryResponse {
+  bytes data = 1;
+  int32 status = 2;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  bool healthy = 1;
+  string version = 2;
+}
+
+message McpRequest {
+  string method = 1;
+  bytes payload = 2;
+}
+
+message McpResponse {
+  bytes result = 1;
+  string error = 2;
+}
