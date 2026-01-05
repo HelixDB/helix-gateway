@@ -2,15 +2,16 @@ syntax = "proto3";
 
 package gateway;
 
-service BackendService {
-  rpc Query(QueryRequest) returns (QueryResponse);
-  rpc Health(HealthRequest) returns (HealthResponse);
-  rpc Mcp(McpRequest) returns (McpResponse);
+enum RequestType {
+  READ = 0;
+  WRITE = 1;
+  MCP = 2;
 }
 
 message QueryRequest {
-  string query = 1;
-  map<string, string> parameters = 2;
+  RequestType request_type = 1;
+  string query = 2;
+  map<string, string> parameters = 3;
 }
 
 message QueryResponse {
@@ -25,12 +26,7 @@ message HealthResponse {
   string version = 2;
 }
 
-message McpRequest {
-  string method = 1;
-  bytes payload = 2;
-}
-
-message McpResponse {
-  bytes result = 1;
-  string error = 2;
+service BackendService {
+  rpc Query(QueryRequest) returns (QueryResponse);
+  rpc Health(HealthRequest) returns (HealthResponse);
 }

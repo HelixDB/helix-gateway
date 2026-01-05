@@ -16,19 +16,18 @@ tower-http = { version = "0.6.8", features = ["trace", "timeout"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 eyre = "0.6.12"
 
+# proto
 tonic = "0.14.2"
 prost = "0.14"
 tonic-prost = "*"
 
+#db
+inventory = "0.3.16"
+futures = "0.3.31"
+
 [build-dependencies]
 tonic-prost-build = "0.14"
 prost-build = "0.14"
-
-[dev-dependencies]
-tower = { version = "0.5", features = ["util"] }
-http-body-util = "0.1"
-tokio-stream = "0.1"
-
 
 [profile.release]
 opt-level = 2
@@ -36,6 +35,11 @@ codegen-units = 1
 lto = true
 panic = "abort"
 strip = "debuginfo"
+
+[dev-dependencies]
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["util"] }
+tokio-stream = "0.1"
 
 [profile.dev]
 opt-level = 0

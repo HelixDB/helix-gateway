@@ -17,7 +17,7 @@ use helix_gateway::generated::gateway_proto::backend_service_server::{
     BackendService, BackendServiceServer,
 };
 use helix_gateway::generated::gateway_proto::{
-    HealthRequest, HealthResponse, McpRequest, McpResponse, QueryRequest, QueryResponse,
+    HealthRequest, HealthResponse, QueryRequest, QueryResponse,
 };
 use http_body_util::BodyExt;
 use tokio::net::TcpListener;
@@ -72,21 +72,6 @@ impl BackendService for MockBackendService {
         Ok(Response::new(HealthResponse {
             healthy: true,
             version: "1.0.0-test".to_string(),
-        }))
-    }
-
-    async fn mcp(
-        &self,
-        request: tonic::Request<McpRequest>,
-    ) -> Result<Response<McpResponse>, Status> {
-        if let Some(ref status) = self.fail_with {
-            return Err(status.clone());
-        }
-
-        let req = request.into_inner();
-        Ok(Response::new(McpResponse {
-            result: format!("MCP result for method: {}", req.method).into_bytes(),
-            error: String::new(),
         }))
     }
 }
@@ -201,7 +186,7 @@ async fn test_query_endpoint_success() {
     let state = create_test_app_state(&format!("http://{}", addr)).await;
     let router = create_router().with_state(state);
 
-    let body = r#"{"query": "get_users", "parameters": {}}"#;
+    let body = r#"{"request_type": 0, "query": "get_users", "parameters": {}}"#;
     let (status, response_body) = make_request(router, "POST", "/query", Some(body)).await;
 
     assert_eq!(status, StatusCode::OK);
@@ -215,7 +200,7 @@ async fn test_query_endpoint_with_parameters() {
     let state = create_test_app_state(&format!("http://{}", addr)).await;
     let router = create_router().with_state(state);
 
-    let body = r#"{"query": "get_user_by_id", "parameters": {"id": "123"}}"#;
+    let body = r#"{"request_type": 0, "query": "get_user_by_id", "parameters": {"id": "123"}}"#;
     let (status, _) = make_request(router, "POST", "/query", Some(body)).await;
 
     assert_eq!(status, StatusCode::OK);
@@ -255,70 +240,8 @@ async fn test_query_endpoint_backend_error() {
     let state = create_test_app_state(&format!("http://{}", addr)).await;
     let router = create_router().with_state(state);
 
-    let body = r#"{"query": "get_users", "parameters": {}}"#;
+    let body = r#"{"request_type": 0, "query": "get_users", "parameters": {}}"#;
     let (status, response_body) = make_request(router, "POST", "/query", Some(body)).await;
-
-    assert_ne!(status, StatusCode::OK);
-    let body_str = String::from_utf8(response_body.to_vec()).unwrap();
-    assert!(body_str.contains("error"));
-}
-
-// ============================================================================
-// MCP Endpoint Tests
-// ============================================================================
-
-#[tokio::test]
-async fn test_mcp_endpoint_success() {
-    let (addr, _shutdown) = start_mock_grpc_server(MockBackendService::new()).await;
-    let state = create_test_app_state(&format!("http://{}", addr)).await;
-    let router = create_router().with_state(state);
-
-    // payload is bytes (Vec<u8>), serialized as array of numbers in JSON
-    let body = r#"{"method": "tools/list", "payload": []}"#;
-    let (status, response_body) = make_request(router, "POST", "/mcp", Some(body)).await;
-
-    assert_eq!(status, StatusCode::OK);
-    let body_str = String::from_utf8(response_body.to_vec()).unwrap();
-    // Check response contains expected fields
-    assert!(body_str.contains("result") || body_str.contains("error"));
-}
-
-#[tokio::test]
-async fn test_mcp_endpoint_with_payload() {
-    let (addr, _shutdown) = start_mock_grpc_server(MockBackendService::new()).await;
-    let state = create_test_app_state(&format!("http://{}", addr)).await;
-    let router = create_router().with_state(state);
-
-    // payload is bytes (Vec<u8>), represented as array of byte values
-    let body = r#"{"method": "tools/call", "payload": [116, 101, 115, 116]}"#;
-    let (status, _) = make_request(router, "POST", "/mcp", Some(body)).await;
-
-    assert_eq!(status, StatusCode::OK);
-}
-
-#[tokio::test]
-async fn test_mcp_endpoint_with_invalid_json() {
-    let (addr, _shutdown) = start_mock_grpc_server(MockBackendService::new()).await;
-    let state = create_test_app_state(&format!("http://{}", addr)).await;
-    let router = create_router().with_state(state);
-
-    let body = r#"not valid json"#;
-    let (status, response_body) = make_request(router, "POST", "/mcp", Some(body)).await;
-
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    let body_str = String::from_utf8(response_body.to_vec()).unwrap();
-    assert!(body_str.contains("error"));
-}
-
-#[tokio::test]
-async fn test_mcp_endpoint_backend_error() {
-    let service = MockBackendService::failing(Status::unimplemented("method not supported"));
-    let (addr, _shutdown) = start_mock_grpc_server(service).await;
-    let state = create_test_app_state(&format!("http://{}", addr)).await;
-    let router = create_router().with_state(state);
-
-    let body = r#"{"method": "unknown/method", "payload": ""}"#;
-    let (status, response_body) = make_request(router, "POST", "/mcp", Some(body)).await;
 
     assert_ne!(status, StatusCode::OK);
     let body_str = String::from_utf8(response_body.to_vec()).unwrap();
@@ -364,18 +287,6 @@ async fn test_wrong_method_on_health_endpoint() {
     assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
 }
 
-#[tokio::test]
-async fn test_wrong_method_on_mcp_endpoint() {
-    let (addr, _shutdown) = start_mock_grpc_server(MockBackendService::new()).await;
-    let state = create_test_app_state(&format!("http://{}", addr)).await;
-    let router = create_router().with_state(state);
-
-    // MCP endpoint only accepts POST
-    let (status, _) = make_request(router, "GET", "/mcp", None).await;
-
-    assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
-}
-
 // ============================================================================
 // Content-Type Tests
 // ============================================================================
@@ -416,7 +327,7 @@ async fn test_concurrent_requests() {
             let state = state.clone();
             tokio::spawn(async move {
                 let router = create_router().with_state(state);
-                let body = format!(r#"{{"query": "test_query_{}", "parameters": {{}}}}"#, i);
+                let body = format!(r#"{{"request_type": 0, "query": "test_query_{}", "parameters": {{}}}}"#, i);
                 let (status, _) = make_request(router, "POST", "/query", Some(&body)).await;
                 status
             })

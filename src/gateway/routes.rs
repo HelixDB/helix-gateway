@@ -17,9 +17,7 @@ use crate::{
     config::Config,
     error::GatewayError,
     format::Format,
-    generated::gateway_proto::{
-        HealthRequest, HealthResponse, McpRequest, McpResponse, QueryRequest, QueryResponse,
-    },
+    generated::gateway_proto::{HealthRequest, HealthResponse, QueryRequest, QueryResponse},
 };
 
 /// Shared application state available to all request handlers.
@@ -55,7 +53,6 @@ pub fn create_router() -> Router<AppState> {
     Router::new()
         .route("/query", post(handle_query))
         .route("/health", get(handle_health))
-        .route("/mcp", post(handle_mcp))
 }
 
 /// Handles `POST /query` requests by forwarding to the backend Query RPC.
@@ -105,38 +102,6 @@ pub async fn handle_health(
     }))
 }
 
-/// Handles `POST /mcp` requests for Model Context Protocol operations.
-pub async fn handle_mcp(
-    State(state): State<AppState>,
-    body: Bytes,
-) -> Result<impl IntoResponse, GatewayError> {
-    let request: McpRequest = state.format.deserialize_owned(&body)?;
-
-    let grpc_request = McpRequest {
-        method: request.method,
-        payload: request.payload,
-    };
-
-    let mut client = state.grpc_client.client();
-    let response = client.mcp(grpc_request).await?.into_inner();
-
-    let http_response = McpResponse {
-        result: response.result,
-        error: response.error,
-    };
-
-    let body = state.format.serialize(&http_response)?;
-
-    Ok((
-        StatusCode::OK,
-        [(
-            axum::http::header::CONTENT_TYPE,
-            state.format.content_type(),
-        )],
-        body,
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,7 +128,7 @@ mod tests {
 
     #[test]
     fn test_query_request_deserialization() {
-        let json = r#"{"query": "get_users", "parameters": {}}"#;
+        let json = r#"{"request_type": 0, "query": "get_users", "parameters": {}}"#;
         let format = Format::Json;
         let result: Result<QueryRequest, _> = format.deserialize_owned(json.as_bytes());
         assert!(result.is_ok());
@@ -172,14 +137,14 @@ mod tests {
     }
 
     #[test]
-    fn test_mcp_request_deserialization() {
-        // payload is bytes (Vec<u8>) so we need to pass base64 or array representation
-        let json = r#"{"method": "test_method", "payload": []}"#;
+    fn test_query_request_with_parameters() {
+        let json = r#"{"request_type": 1, "query": "create_user", "parameters": {"name": "Alice"}}"#;
         let format = Format::Json;
-        let result: Result<McpRequest, _> = format.deserialize_owned(json.as_bytes());
+        let result: Result<QueryRequest, _> = format.deserialize_owned(json.as_bytes());
         assert!(result.is_ok());
         let request = result.unwrap();
-        assert_eq!(request.method, "test_method");
+        assert_eq!(request.query, "create_user");
+        assert_eq!(request.parameters.get("name"), Some(&"Alice".to_string()));
     }
 
     #[test]
@@ -209,17 +174,6 @@ mod tests {
         let json = String::from_utf8(json_bytes.to_vec()).unwrap();
         assert!(json.contains("\"healthy\":true"));
         assert!(json.contains("\"version\":\"1.0.0\""));
-    }
-
-    #[test]
-    fn test_mcp_response_serialization() {
-        let response = McpResponse {
-            result: b"result data".to_vec(),
-            error: "".to_string(),
-        };
-        let format = Format::Json;
-        let result = format.serialize(&response);
-        assert!(result.is_ok());
     }
 
     #[test]
