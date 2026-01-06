@@ -8,7 +8,10 @@ use crate::{
     config::Config,
     error::GatewayError,
     format::Format,
-    gateway::{embeddings, introspection::Introspection},
+    gateway::{
+        embeddings::{self, EmbeddingClientPool},
+        introspection::Introspection,
+    },
     generated::gateway_proto::{HealthRequest, HealthResponse, QueryRequest, QueryResponse},
 };
 use axum::{
@@ -19,7 +22,6 @@ use axum::{
     routing::{get, post},
 };
 use bytes::Bytes;
-use futures::future::try_join_all;
 use pbjson_types::Struct;
 
 /// Shared application state available to all request handlers.
@@ -29,6 +31,7 @@ pub struct AppState {
     grpc_client: ProtoClient,
     format: Format,
     introspection: Introspection,
+    embedding_pool: EmbeddingClientPool,
 }
 
 impl AppState {
@@ -38,6 +41,7 @@ impl AppState {
             grpc_client: client,
             format: Format::default(),
             introspection: Introspection::default(),
+            embedding_pool: EmbeddingClientPool::default(),
         }
     }
 
@@ -53,6 +57,11 @@ impl AppState {
 
     pub fn with_introspection(mut self, introspection: Introspection) -> Self {
         self.introspection = introspection;
+        self
+    }
+
+    pub fn with_embedding_pool(mut self, pool: EmbeddingClientPool) -> Self {
+        self.embedding_pool = pool;
         self
     }
 }
@@ -79,25 +88,31 @@ pub async fn handle_query(
 
     let parameters: Struct = sonic_rs::from_slice(&body)?;
 
-    // Handle embeddings if configgered
+    // Handle embeddings using batched API for better throughput
     let mut embeddings = None;
     if let Some(ref embedding_config) = db_query.embedding_config {
-        embeddings = Some(Struct::default());
-        let futures: Vec<_> = embedding_config
+        // Collect all texts that need embedding
+        let texts_to_embed: Vec<(String, String)> = embedding_config
             .embedded_variables
             .iter()
-            .filter_map(|embedding_key| {
-                extract_text_for_embedding(&parameters, embedding_key).map(|text| async move {
-                    let embedding = embeddings::embed(embedding_config, &text).await?;
-                    Ok::<_, GatewayError>((embedding_key.clone(), embedding))
-                })
+            .filter_map(|key| {
+                extract_text_for_embedding(&parameters, key).map(|text| (key.clone(), text))
             })
             .collect();
 
-        let results = try_join_all(futures).await?;
+        if !texts_to_embed.is_empty() {
+            // Single batch call for all fields (reduces API round-trips)
+            let embedding_results = embeddings::embed_batch(
+                &state.embedding_pool,
+                embedding_config,
+                texts_to_embed,
+            )
+            .await?;
 
-        for (key, embedding) in results {
-            insert_embedding(&mut embeddings, &key, embedding);
+            embeddings = Some(Struct::default());
+            for (key, embedding) in embedding_results {
+                insert_embedding(&mut embeddings, &key, embedding);
+            }
         }
     }
 
@@ -162,14 +177,10 @@ fn insert_embedding(embeddings: &mut Option<Struct>, key: &str, embedding: Vec<f
 
 /// Handles `GET /health` requests by checking backend health.
 pub async fn handle_health(
-    State(mut state): State<AppState>,
+    State(state): State<AppState>,
 ) -> Result<Json<HealthResponse>, GatewayError> {
-    let response = state
-        .grpc_client
-        .inner()
-        .health(HealthRequest {})
-        .await?
-        .into_inner();
+    let mut client = state.grpc_client.client();
+    let response = client.health(HealthRequest {}).await?.into_inner();
 
     Ok(Json(HealthResponse {
         healthy: response.healthy,
@@ -194,7 +205,7 @@ mod tests {
     fn test_config_default_values() {
         let config = Config::default();
         assert_eq!(config.listen_addr.port(), 8080);
-        assert_eq!(config.backend_addr, "http://127.0.0.1:50051");
+        assert_eq!(config.grpc.backend_addr, "http://127.0.0.1:50051");
     }
 
     #[test]

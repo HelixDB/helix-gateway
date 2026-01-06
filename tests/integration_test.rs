@@ -11,7 +11,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use bytes::Bytes;
-use helix_gateway::config::Config;
+use helix_gateway::config::{Config, GrpcConfig};
 use helix_gateway::format::Format;
 use helix_gateway::gateway::introspection::{DbQuery, Introspection};
 use helix_gateway::gateway::routes::{AppState, create_router};
@@ -133,7 +133,11 @@ fn create_test_queries() -> Introspection {
 
 /// Creates an AppState connected to the given gRPC backend address.
 async fn create_test_app_state(backend_addr: &str) -> AppState {
-    let client = helix_gateway::client::ProtoClient::connect(backend_addr)
+    let grpc_config = GrpcConfig {
+        backend_addr: backend_addr.to_string(),
+        ..GrpcConfig::default()
+    };
+    let client = helix_gateway::client::ProtoClient::connect(&grpc_config)
         .await
         .expect("Failed to connect to mock backend");
 

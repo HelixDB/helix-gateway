@@ -1,37 +1,58 @@
 //! gRPC client wrapper for backend service communication.
 
+use crate::config::GrpcConfig;
 use crate::generated::gateway_proto::backend_service_client::BackendServiceClient;
 use eyre::Result;
-use tonic::transport::Channel;
+use tonic::transport::{Channel, Endpoint};
 
-/// A wrapper around the generated gRPC client that simplifies connection management.
+/// A wrapper around the generated gRPC client with connection pooling via HTTP/2.
 ///
 /// The client is cheaply cloneable (backed by a channel) and safe to share across tasks.
+/// HTTP/2 multiplexes many concurrent requests over a single connection efficiently.
+///
+/// The channel is configured with:
+/// - Connection and request timeouts
+/// - TCP keepalive for connection health
+/// - HTTP/2 keepalive pings for idle connection detection
+/// - Adaptive flow control for optimal throughput
 #[derive(Clone)]
 pub struct ProtoClient {
     client: BackendServiceClient<Channel>,
 }
 
 impl ProtoClient {
-    /// Connects to the gRPC backend at the given address.
-    pub async fn connect(addr: &str) -> Result<Self> {
-        let channel = Channel::from_shared(addr.to_string())?.connect().await?;
+    /// Connects to the gRPC backend with the given configuration.
+    ///
+    /// The channel is configured with timeouts, keepalive, and HTTP/2 settings
+    /// from the provided [`GrpcConfig`].
+    pub async fn connect(config: &GrpcConfig) -> Result<Self> {
+        let endpoint = Endpoint::from_shared(config.backend_addr.clone())?
+            // Connection establishment timeout
+            .connect_timeout(config.connect_timeout)
+            // Per-request timeout
+            .timeout(config.request_timeout)
+            // TCP keepalive for connection health
+            .tcp_keepalive(Some(config.tcp_keepalive))
+            // HTTP/2 keepalive ping interval
+            .http2_keep_alive_interval(config.http2_keepalive_interval)
+            // HTTP/2 keepalive ping timeout
+            .keep_alive_timeout(config.http2_keepalive_timeout)
+            // Send keepalive pings even when idle
+            .keep_alive_while_idle(true)
+            // Adaptive flow control window for better throughput
+            .http2_adaptive_window(config.http2_adaptive_window);
+
+        let channel = endpoint.connect().await?;
 
         Ok(Self {
             client: BackendServiceClient::new(channel),
         })
     }
 
-    /// Returns a mutable reference to the underlying client.
+    /// Returns a cloned client for use in request handlers.
     ///
-    /// Use this when you need a single operation and want to avoid cloning.
-    pub fn inner(&mut self) -> &mut BackendServiceClient<Channel> {
-        &mut self.client
-    }
-
-    /// Returns a cloned client for use in concurrent operations.
-    ///
-    /// The clone is cheap as the underlying channel is shared.
+    /// The clone is cheap as the underlying channel is shared. This is the
+    /// recommended way to get a client for making gRPC calls.
     pub fn client(&self) -> BackendServiceClient<Channel> {
         self.client.clone()
     }
@@ -41,29 +62,40 @@ impl ProtoClient {
 mod tests {
     use super::*;
 
+    fn config_with_addr(addr: &str) -> GrpcConfig {
+        GrpcConfig {
+            backend_addr: addr.to_string(),
+            ..GrpcConfig::default()
+        }
+    }
+
     #[tokio::test]
     async fn test_connect_invalid_uri_scheme() {
         // Invalid URI without scheme should fail
-        let result = ProtoClient::connect("invalid-uri-no-scheme").await;
+        let config = config_with_addr("invalid-uri-no-scheme");
+        let result = ProtoClient::connect(&config).await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn test_connect_empty_address() {
-        let result = ProtoClient::connect("").await;
+        let config = config_with_addr("");
+        let result = ProtoClient::connect(&config).await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn test_connect_malformed_uri() {
-        let result = ProtoClient::connect("://malformed").await;
+        let config = config_with_addr("://malformed");
+        let result = ProtoClient::connect(&config).await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn test_connect_unreachable_host() {
         // This should fail to connect but the URI parsing should succeed
-        let result = ProtoClient::connect("http://127.0.0.1:1").await;
+        let config = config_with_addr("http://127.0.0.1:1");
+        let result = ProtoClient::connect(&config).await;
         // Connection to port 1 should fail (nothing listening there)
         assert!(result.is_err());
     }

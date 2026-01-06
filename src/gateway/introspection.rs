@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use sonic_rs::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct EmbeddingConfig {
@@ -107,4 +107,40 @@ pub struct DbQuery {
 pub struct Introspection {
     pub queries: HashMap<String, DbQuery>,
     pub schema: HashMap<String, Value>,
+}
+
+/// Describes which embedding providers are needed based on query configurations.
+///
+/// Used at startup to initialize only the required provider clients.
+#[derive(Clone, Debug, Default)]
+pub struct RequiredProviders {
+    pub needs_openai: bool,
+    pub needs_azure: bool,
+    pub needs_gemini: bool,
+    pub local_urls: HashSet<String>,
+}
+
+impl Introspection {
+    /// Scans all queries to determine which embedding providers are needed.
+    ///
+    /// This allows initializing only the required clients at startup,
+    /// avoiding unnecessary connections to unused providers.
+    pub fn required_providers(&self) -> RequiredProviders {
+        let mut required = RequiredProviders::default();
+
+        for query in self.queries.values() {
+            if let Some(ref config) = query.embedding_config {
+                match &config.provider_config {
+                    ProviderConfig::OpenAI(_) => required.needs_openai = true,
+                    ProviderConfig::Azure(_) => required.needs_azure = true,
+                    ProviderConfig::Gemini(_) => required.needs_gemini = true,
+                    ProviderConfig::Local(cfg) => {
+                        required.local_urls.insert(cfg.url.clone());
+                    }
+                }
+            }
+        }
+
+        required
+    }
 }

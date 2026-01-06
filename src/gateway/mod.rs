@@ -51,8 +51,11 @@ pub async fn run() -> eyre::Result<()> {
 
     let config = config::Config::from_env();
 
-    let grpc_client = ProtoClient::connect(&config.backend_addr).await?;
-    info!("Connected to backend at {}", config.backend_addr);
+    let grpc_client = ProtoClient::connect(&config.grpc).await?;
+    info!(
+        "Connected to backend at {} (connect_timeout={:?}, request_timeout={:?})",
+        config.grpc.backend_addr, config.grpc.connect_timeout, config.grpc.request_timeout
+    );
 
     let introspection = load_queries("introspect.json")?;
     info!(
@@ -60,10 +63,22 @@ pub async fn run() -> eyre::Result<()> {
         introspection.queries.len()
     );
 
+    // Initialize embedding client pool based on required providers
+    let required_providers = introspection.required_providers();
+    let embedding_pool = embeddings::EmbeddingClientPool::new(&required_providers)?;
+    info!(
+        "Initialized embedding clients: openai={}, azure={}, gemini={}, local={}",
+        required_providers.needs_openai,
+        required_providers.needs_azure,
+        required_providers.needs_gemini,
+        required_providers.local_urls.len()
+    );
+
     let state = AppState::new(grpc_client)
         .with_config(config.clone())
         .with_format(Format::Json)
-        .with_introspection(introspection);
+        .with_introspection(introspection)
+        .with_embedding_pool(embedding_pool);
 
     let app: Router = create_router()
         .layer(TimeoutLayer::with_status_code(
