@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use sonic_rs::Value;
 use std::collections::{HashMap, HashSet};
 
+use crate::generated::gateway_proto::RequestType;
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct EmbeddingConfig {
     pub provider_config: ProviderConfig,
@@ -95,11 +97,10 @@ fn default_local_url() -> String {
 /// A single query definition loaded from introspect.json.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DbQuery {
-    pub request_type: i32,
+    pub request_type: RequestType,
     pub parameters: pbjson_types::Struct,
     pub return_types: pbjson_types::Struct,
     pub embedding_config: Option<EmbeddingConfig>,
-    pub is_mcp: bool,
 }
 
 /// Container for query definitions loaded from introspect.json.

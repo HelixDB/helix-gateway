@@ -32,11 +32,6 @@ impl<DB> QueryInput<DB> {
     }
 }
 
-pub enum RequestType {
-    Read,
-    Write,
-    MCP,
-}
 #[derive(Clone, Debug)]
 pub struct Handler<DB: Send + Sync> {
     pub name: &'static str,
@@ -137,7 +132,7 @@ impl<DB: Send + Sync + Default + 'static> Router<DB> {
     }
 }
 
-// TODO: handler to run the functions
-// TODO: handle embeddings before calling db
-// TODO: handle mcp connections in gateway
-// TODO: handle schema caching and introspection
+// TODO: handler to run the functions DONE
+// TODO: handle embeddings before calling db DONE
+// TODO: handle schema caching and introspection DOING
+// TODO: handle mcp connections in gateway DOING

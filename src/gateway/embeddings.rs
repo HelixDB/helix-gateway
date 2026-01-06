@@ -118,7 +118,7 @@ pub async fn embed(
 pub async fn embed_batch(
     pool: &EmbeddingClientPool,
     config: &EmbeddingConfig,
-    texts: Vec<(String, String)>, // (field_key, text_value)
+    texts: Vec<(&str, &str)>, // (field_key, text_value)
 ) -> Result<HashMap<String, Vec<f64>>, GatewayError> {
     if texts.is_empty() {
         return Ok(HashMap::new());
@@ -156,19 +156,18 @@ async fn embed_openai(
 async fn embed_batch_openai(
     pool: &EmbeddingClientPool,
     cfg: &OpenAIEmbeddingConfig,
-    texts: Vec<(String, String)>,
+    texts: Vec<(&str, &str)>,
 ) -> Result<HashMap<String, Vec<f64>>, GatewayError> {
     let client = pool.openai()?;
     let model_id = openai_model_id(cfg);
     let model = client.embedding_model(model_id);
 
     // Build with all documents - rig-core batches them into a single API call
-    let keys: Vec<String> = texts.iter().map(|(k, _)| k.clone()).collect();
 
     let mut builder = EmbeddingsBuilder::new(model);
     for (_, text) in &texts {
         builder = builder
-            .document(text.clone())
+            .document(text)
             .map_err(|e| GatewayError::EmbeddingError(e.to_string()))?;
     }
 
@@ -179,9 +178,9 @@ async fn embed_batch_openai(
 
     // Map results back to keys (embeddings are returned in order)
     let mut result = HashMap::new();
-    for (key, (_, one_or_many)) in keys.into_iter().zip(embeddings) {
+    for (key, (_, one_or_many)) in texts.iter().map(|(k, _)| k).zip(embeddings) {
         let vec: Vec<f64> = one_or_many.first().vec.iter().map(|&x| x as f64).collect();
-        result.insert(key, vec);
+        result.insert(key.to_string(), vec);
     }
 
     Ok(result)
@@ -219,18 +218,16 @@ async fn embed_azure(
 async fn embed_batch_azure(
     pool: &EmbeddingClientPool,
     cfg: &AzureEmbeddingConfig,
-    texts: Vec<(String, String)>,
+    texts: Vec<(&str, &str)>,
 ) -> Result<HashMap<String, Vec<f64>>, GatewayError> {
     let client = pool.azure()?;
     let model_id = azure_model_id(cfg);
     let model = client.embedding_model(model_id);
 
-    let keys: Vec<String> = texts.iter().map(|(k, _)| k.clone()).collect();
-
     let mut builder = EmbeddingsBuilder::new(model);
     for (_, text) in &texts {
         builder = builder
-            .document(text.clone())
+            .document(text)
             .map_err(|e| GatewayError::EmbeddingError(e.to_string()))?;
     }
 
@@ -240,9 +237,9 @@ async fn embed_batch_azure(
         .map_err(|e| GatewayError::EmbeddingError(e.to_string()))?;
 
     let mut result = HashMap::new();
-    for (key, (_, one_or_many)) in keys.into_iter().zip(embeddings) {
+    for (key, (_, one_or_many)) in texts.iter().map(|(k, _)| k).into_iter().zip(embeddings) {
         let vec: Vec<f64> = one_or_many.first().vec.iter().map(|&x| x as f64).collect();
-        result.insert(key, vec);
+        result.insert(key.to_string(), vec);
     }
 
     Ok(result)
@@ -280,18 +277,16 @@ async fn embed_gemini(
 async fn embed_batch_gemini(
     pool: &EmbeddingClientPool,
     cfg: &GeminiEmbeddingConfig,
-    texts: Vec<(String, String)>,
+    texts: Vec<(&str, &str)>,
 ) -> Result<HashMap<String, Vec<f64>>, GatewayError> {
     let client = pool.gemini()?;
     let model_id = gemini_model_id(cfg);
     let model = client.embedding_model(model_id);
 
-    let keys: Vec<String> = texts.iter().map(|(k, _)| k.clone()).collect();
-
     let mut builder = EmbeddingsBuilder::new(model);
     for (_, text) in &texts {
         builder = builder
-            .document(text.clone())
+            .document(text)
             .map_err(|e| GatewayError::EmbeddingError(e.to_string()))?;
     }
 
@@ -301,9 +296,9 @@ async fn embed_batch_gemini(
         .map_err(|e| GatewayError::EmbeddingError(e.to_string()))?;
 
     let mut result = HashMap::new();
-    for (key, (_, one_or_many)) in keys.into_iter().zip(embeddings) {
+    for (key, (_, one_or_many)) in texts.iter().map(|(k, _)| k).zip(embeddings) {
         let vec: Vec<f64> = one_or_many.first().vec.iter().map(|&x| x as f64).collect();
-        result.insert(key, vec);
+        result.insert(key.to_string(), vec);
     }
 
     Ok(result)
@@ -341,7 +336,7 @@ async fn embed_local(
 async fn embed_batch_local(
     pool: &EmbeddingClientPool,
     cfg: &LocalEmbeddingConfig,
-    texts: Vec<(String, String)>,
+    texts: Vec<(&str, &str)>,
 ) -> Result<HashMap<String, Vec<f64>>, GatewayError> {
     // Local service may not support batch - use concurrent individual calls.
     // This still benefits from connection pooling via the shared reqwest::Client.
@@ -371,7 +366,10 @@ async fn embed_batch_local(
         .collect();
 
     let results = try_join_all(futures).await?;
-    Ok(results.into_iter().collect())
+    Ok(results
+        .into_iter()
+        .map(|(key, embedding)| (key.to_string(), embedding))
+        .collect())
 }
 
 async fn parse_local_embedding_response(

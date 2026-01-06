@@ -3,7 +3,6 @@ syntax = "proto3";
 package gateway;
 
 import "google/protobuf/struct.proto";
-
 enum RequestType {
   READ = 0;
   WRITE = 1;
@@ -13,8 +12,8 @@ enum RequestType {
 message QueryRequest {
   RequestType request_type = 1;
   string query = 2;
-  google.protobuf.Struct parameters = 3;
-  google.protobuf.Struct embeddings = 4;
+  optional google.protobuf.Struct parameters = 3;
+  optional google.protobuf.Struct embeddings = 4;
 }
 
 message QueryResponse {

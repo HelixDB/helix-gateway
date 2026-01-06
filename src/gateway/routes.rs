@@ -92,22 +92,25 @@ pub async fn handle_query(
     let mut embeddings = None;
     if let Some(ref embedding_config) = db_query.embedding_config {
         // Collect all texts that need embedding
-        let texts_to_embed: Vec<(String, String)> = embedding_config
+        let texts_to_embed: Vec<(&str, &str)> = embedding_config
             .embedded_variables
             .iter()
             .filter_map(|key| {
-                extract_text_for_embedding(&parameters, key).map(|text| (key.clone(), text))
+                if let Some(value) = parameters.fields.get(key)
+                    && let Some(pbjson_types::value::Kind::StringValue(s)) = &value.kind
+                {
+                    Some((key.as_str(), s.as_str()))
+                } else {
+                    None
+                }
             })
             .collect();
 
         if !texts_to_embed.is_empty() {
             // Single batch call for all fields (reduces API round-trips)
-            let embedding_results = embeddings::embed_batch(
-                &state.embedding_pool,
-                embedding_config,
-                texts_to_embed,
-            )
-            .await?;
+            let embedding_results =
+                embeddings::embed_batch(&state.embedding_pool, embedding_config, texts_to_embed)
+                    .await?;
 
             embeddings = Some(Struct::default());
             for (key, embedding) in embedding_results {
@@ -117,7 +120,7 @@ pub async fn handle_query(
     }
 
     let request = QueryRequest {
-        request_type: db_query.request_type,
+        request_type: db_query.request_type as i32,
         query,
         parameters: Some(parameters),
         embeddings,
@@ -141,16 +144,6 @@ pub async fn handle_query(
         )],
         body,
     ))
-}
-
-/// Extracts text to embed from parameters, checking common field names.
-fn extract_text_for_embedding(parameters: &Struct, embedding_key: &str) -> Option<String> {
-    if let Some(value) = parameters.fields.get(embedding_key)
-        && let Some(pbjson_types::value::Kind::StringValue(s)) = &value.kind
-    {
-        return Some(s.clone());
-    }
-    None
 }
 
 /// Inserts the embedding vector into the parameters struct.
