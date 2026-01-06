@@ -3,23 +3,23 @@
 //! This module defines the HTTP API surface of the gateway, translating
 //! incoming requests to gRPC calls and formatting responses.
 
-use axum::{
-    extract::{Path, State},
-    http::StatusCode,
-    response::IntoResponse,
-    routing::{get, post},
-    Json, Router,
-};
-use bytes::Bytes;
-
 use crate::{
     client::ProtoClient,
     config::Config,
     error::GatewayError,
     format::Format,
-    gateway::queries::Queries,
+    gateway::{embeddings, introspection::Introspection},
     generated::gateway_proto::{HealthRequest, HealthResponse, QueryRequest, QueryResponse},
 };
+use axum::{
+    Json, Router,
+    extract::{Path, State},
+    http::StatusCode,
+    response::IntoResponse,
+    routing::{get, post},
+};
+use bytes::Bytes;
+use futures::future::try_join_all;
 use pbjson_types::Struct;
 
 /// Shared application state available to all request handlers.
@@ -28,7 +28,7 @@ pub struct AppState {
     config: Config,
     grpc_client: ProtoClient,
     format: Format,
-    queries: Queries,
+    introspection: Introspection,
 }
 
 impl AppState {
@@ -37,7 +37,7 @@ impl AppState {
             config: Config::default(),
             grpc_client: client,
             format: Format::default(),
-            queries: Queries::default(),
+            introspection: Introspection::default(),
         }
     }
 
@@ -51,8 +51,8 @@ impl AppState {
         self
     }
 
-    pub fn with_queries(mut self, queries: Queries) -> Self {
-        self.queries = queries;
+    pub fn with_introspection(mut self, introspection: Introspection) -> Self {
+        self.introspection = introspection;
         self
     }
 }
@@ -71,16 +71,41 @@ pub async fn handle_query(
     body: Bytes,
 ) -> Result<impl IntoResponse, GatewayError> {
     let db_query = state
+        .introspection
         .queries
         .get(&query)
+        .ok_or(())
         .map_err(|_| GatewayError::QueryNotFound)?;
 
     let parameters: Struct = sonic_rs::from_slice(&body)?;
+
+    // Handle embeddings if configgered
+    let mut embeddings = None;
+    if let Some(ref embedding_config) = db_query.embedding_config {
+        embeddings = Some(Struct::default());
+        let futures: Vec<_> = embedding_config
+            .embedded_variables
+            .iter()
+            .filter_map(|embedding_key| {
+                extract_text_for_embedding(&parameters, embedding_key).map(|text| async move {
+                    let embedding = embeddings::embed(embedding_config, &text).await?;
+                    Ok::<_, GatewayError>((embedding_key.clone(), embedding))
+                })
+            })
+            .collect();
+
+        let results = try_join_all(futures).await?;
+
+        for (key, embedding) in results {
+            insert_embedding(&mut embeddings, &key, embedding);
+        }
+    }
 
     let request = QueryRequest {
         request_type: db_query.request_type,
         query,
         parameters: Some(parameters),
+        embeddings,
     };
 
     let mut client = state.grpc_client.client();
@@ -103,6 +128,38 @@ pub async fn handle_query(
     ))
 }
 
+/// Extracts text to embed from parameters, checking common field names.
+fn extract_text_for_embedding(parameters: &Struct, embedding_key: &str) -> Option<String> {
+    if let Some(value) = parameters.fields.get(embedding_key)
+        && let Some(pbjson_types::value::Kind::StringValue(s)) = &value.kind
+    {
+        return Some(s.clone());
+    }
+    None
+}
+
+/// Inserts the embedding vector into the parameters struct.
+fn insert_embedding(embeddings: &mut Option<Struct>, key: &str, embedding: Vec<f64>) {
+    debug_assert!(embeddings.is_some());
+    use pbjson_types::{ListValue, Value, value::Kind};
+
+    let list = ListValue {
+        values: embedding
+            .into_iter()
+            .map(|v| Value {
+                kind: Some(Kind::NumberValue(v)),
+            })
+            .collect(),
+    };
+
+    embeddings.as_mut().unwrap().fields.insert(
+        key.to_string(),
+        Value {
+            kind: Some(Kind::ListValue(list)),
+        },
+    );
+}
+
 /// Handles `GET /health` requests by checking backend health.
 pub async fn handle_health(
     State(mut state): State<AppState>,
@@ -122,7 +179,7 @@ pub async fn handle_health(
 
 #[cfg(test)]
 mod tests {
-    use pbjson_types::{value::Kind, Value};
+    use pbjson_types::{Value, value::Kind};
 
     use super::*;
 

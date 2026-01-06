@@ -1,32 +1,29 @@
 //! Gateway server initialization and lifecycle management.
-
-use std::collections::HashMap;
-use std::time::Duration;
-
+//!
 use crate::{
     client::ProtoClient,
     config,
     format::Format,
     gateway::{
-        queries::{DbQuery, Queries},
-        routes::{create_router, AppState},
+        introspection::Introspection,
+        routes::{AppState, create_router},
     },
 };
-use axum::{http::StatusCode, Router};
+use axum::{Router, http::StatusCode};
+use std::time::Duration;
 use tokio::net::TcpListener;
 use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
 use tracing::info;
 
-pub mod queries;
+pub mod embeddings;
+pub mod introspection;
+pub mod mcp;
 pub mod routes;
 
-#[global_allocator]
-static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
-
-fn load_queries(path: &str) -> eyre::Result<Queries> {
+fn load_queries(path: &str) -> eyre::Result<Introspection> {
     let file = std::fs::read_to_string(path)?;
-    let map: HashMap<String, DbQuery> = sonic_rs::from_str(&file)?;
-    Ok(Queries::from_map(map))
+    let map: Introspection = sonic_rs::from_str(&file)?;
+    Ok(map)
 }
 
 /// Starts the gateway server.
@@ -57,13 +54,16 @@ pub async fn run() -> eyre::Result<()> {
     let grpc_client = ProtoClient::connect(&config.backend_addr).await?;
     info!("Connected to backend at {}", config.backend_addr);
 
-    let queries = load_queries("introspect.json")?;
-    info!("Loaded {} queries from introspect.json", queries.len());
+    let introspection = load_queries("introspect.json")?;
+    info!(
+        "Loaded {} queries from introspect.json",
+        introspection.queries.len()
+    );
 
     let state = AppState::new(grpc_client)
         .with_config(config.clone())
         .with_format(Format::Json)
-        .with_queries(queries);
+        .with_introspection(introspection);
 
     let app: Router = create_router()
         .layer(TimeoutLayer::with_status_code(

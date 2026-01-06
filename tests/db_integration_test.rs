@@ -13,8 +13,8 @@ use helix_gateway::generated::gateway_proto::backend_service_server::BackendServ
 use helix_gateway::generated::gateway_proto::{HealthRequest, QueryRequest, RequestType};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
-use tonic::transport::Server;
 use tonic::Request;
+use tonic::transport::Server;
 
 // ============================================================================
 // Test Database Type
@@ -116,6 +116,7 @@ async fn test_db_service_read_query_success() {
         request_type: RequestType::Read as i32,
         query: "test_read".to_string(),
         parameters: None,
+        embeddings: None,
     });
 
     let response = service.query(request).await.unwrap();
@@ -133,6 +134,7 @@ async fn test_db_service_read_query_unknown_handler() {
         request_type: RequestType::Read as i32,
         query: "nonexistent_handler".to_string(),
         parameters: None,
+        embeddings: None,
     });
 
     let result = service.query(request).await;
@@ -153,6 +155,7 @@ async fn test_db_service_write_query_success() {
         request_type: RequestType::Write as i32,
         query: "test_write".to_string(),
         parameters: None,
+        embeddings: None,
     });
 
     let response = service.query(request).await.unwrap();
@@ -172,6 +175,7 @@ async fn test_db_service_write_handler_not_in_read_routes() {
         request_type: RequestType::Read as i32,
         query: "test_write".to_string(),
         parameters: None,
+        embeddings: None,
     });
 
     let result = service.query(request).await;
@@ -192,6 +196,7 @@ async fn test_db_service_mcp_query_success() {
         request_type: RequestType::Mcp as i32,
         query: "test_mcp".to_string(),
         parameters: None,
+        embeddings: None,
     });
 
     let response = service.query(request).await.unwrap();
@@ -211,6 +216,7 @@ async fn test_db_service_mcp_handler_not_in_read_routes() {
         request_type: RequestType::Read as i32,
         query: "test_mcp".to_string(),
         parameters: None,
+        embeddings: None,
     });
 
     let result = service.query(request).await;
@@ -231,6 +237,7 @@ async fn test_db_service_handler_error_returns_internal_status() {
         request_type: RequestType::Read as i32,
         query: "test_error".to_string(),
         parameters: None,
+        embeddings: None,
     });
 
     let result = service.query(request).await;
@@ -304,6 +311,7 @@ async fn test_db_service_grpc_server_query() {
             request_type: RequestType::Read as i32,
             query: "test_read".to_string(),
             parameters: None,
+            embeddings: None,
         })
         .await
         .unwrap();

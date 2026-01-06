@@ -7,14 +7,14 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::Duration;
 
+use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use axum::Router;
 use bytes::Bytes;
 use helix_gateway::config::Config;
 use helix_gateway::format::Format;
-use helix_gateway::gateway::queries::{DbQuery, Queries};
-use helix_gateway::gateway::routes::{create_router, AppState};
+use helix_gateway::gateway::introspection::{DbQuery, Introspection};
+use helix_gateway::gateway::routes::{AppState, create_router};
 use helix_gateway::generated::gateway_proto::backend_service_server::{
     BackendService, BackendServiceServer,
 };
@@ -24,7 +24,7 @@ use helix_gateway::generated::gateway_proto::{
 use http_body_util::BodyExt;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
-use tonic::{transport::Server, Response, Status};
+use tonic::{Response, Status, transport::Server};
 use tower::ServiceExt;
 
 /// Mock backend service implementation for testing.
@@ -110,22 +110,25 @@ fn test_query(request_type: i32) -> DbQuery {
         request_type,
         parameters: pbjson_types::Struct::default(),
         return_types: pbjson_types::Struct::default(),
-        is_embedding: false,
+        embedding_config: None,
         is_mcp: false,
     }
 }
 
 /// Creates test queries for integration tests.
-fn create_test_queries() -> Queries {
-    let mut map = HashMap::new();
+fn create_test_queries() -> Introspection {
+    let mut queries = HashMap::new();
     // Add test queries used by the integration tests
-    map.insert("query".to_string(), test_query(0));
-    map.insert("get_users".to_string(), test_query(0));
-    map.insert("get_user_by_id".to_string(), test_query(0));
+    queries.insert("query".to_string(), test_query(0));
+    queries.insert("get_users".to_string(), test_query(0));
+    queries.insert("get_user_by_id".to_string(), test_query(0));
     for i in 0..10 {
-        map.insert(format!("test_query_{}", i), test_query(0));
+        queries.insert(format!("test_query_{}", i), test_query(0));
     }
-    Queries::from_map(map)
+    Introspection {
+        queries,
+        schema: HashMap::new(),
+    }
 }
 
 /// Creates an AppState connected to the given gRPC backend address.
@@ -137,7 +140,7 @@ async fn create_test_app_state(backend_addr: &str) -> AppState {
     AppState::new(client)
         .with_config(Config::default())
         .with_format(Format::Json)
-        .with_queries(create_test_queries())
+        .with_introspection(create_test_queries())
 }
 
 /// Helper to make a request to the test router.
