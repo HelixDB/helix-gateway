@@ -13,16 +13,25 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum GatewayError {
     #[error("parse error: {0}")]
-    ParseError(#[from] eyre::Error),
+    ParseError(#[from] sonic_rs::Error),
 
-    #[error("gRPC error: {0}")]
-    Grpc(#[from] tonic::Status),
+    #[error("query not found")]
+    QueryNotFound,
 
     #[error("Invalid request: {0}")]
     InvalidRequest(String),
 
+    #[error("missing parameters: {0}")]
+    MissingParametersError(String),
+
+    #[error("gRPC error: {0}")]
+    Grpc(#[from] tonic::Status),
+
     #[error("Backend unavailable")]
     BackendUnavailable,
+
+    #[error("Internal server error")]
+    InternalError(#[from] eyre::Error),
 }
 
 #[derive(Serialize)]
@@ -32,19 +41,17 @@ struct ErrorResponse {
 
 impl IntoResponse for GatewayError {
     fn into_response(self) -> Response {
-        let (status, message) = match &self {
-            GatewayError::ParseError(e) => (StatusCode::BAD_REQUEST, e.to_string()),
-            GatewayError::InvalidRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
-            GatewayError::Grpc(status) => (
-                StatusCode::from_u16(status.code() as u16)
-                    .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
-                status.message().to_string(),
-            ),
-            GatewayError::BackendUnavailable => (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "Backend unavailable".to_string(),
-            ),
+        let status = match &self {
+            GatewayError::ParseError(_) => StatusCode::BAD_REQUEST,
+            GatewayError::InvalidRequest(_) => StatusCode::BAD_REQUEST,
+            GatewayError::MissingParametersError(_) => StatusCode::BAD_REQUEST,
+            GatewayError::QueryNotFound => StatusCode::NOT_FOUND,
+            GatewayError::Grpc(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            GatewayError::BackendUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+            GatewayError::InternalError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
+
+        let message = self.to_string();
 
         let body = ErrorResponse { error: message };
         (status, Json(body)).into_response()
@@ -58,9 +65,9 @@ mod tests {
 
     #[test]
     fn test_parse_error_display() {
-        let err = GatewayError::ParseError(eyre::eyre!("invalid json"));
+        let sonic_err = sonic_rs::from_str::<serde::de::IgnoredAny>("invalid json").unwrap_err();
+        let err = GatewayError::ParseError(sonic_err);
         assert!(err.to_string().contains("parse error"));
-        assert!(err.to_string().contains("invalid json"));
     }
 
     #[test]
@@ -84,7 +91,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_parse_error_response_status() {
-        let err = GatewayError::ParseError(eyre::eyre!("bad input"));
+        let sonic_err = sonic_rs::from_str::<serde::de::IgnoredAny>("bad input").unwrap_err();
+        let err = GatewayError::ParseError(sonic_err);
         let response = err.into_response();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
@@ -124,10 +132,10 @@ mod tests {
     }
 
     #[test]
-    fn test_error_from_eyre() {
-        let eyre_err = eyre::eyre!("something went wrong");
-        let gateway_err: GatewayError = GatewayError::ParseError(eyre_err);
-        assert!(gateway_err.to_string().contains("something went wrong"));
+    fn test_error_from_sonic() {
+        let sonic_err = sonic_rs::from_str::<serde::de::IgnoredAny>("{invalid}").unwrap_err();
+        let gateway_err: GatewayError = GatewayError::ParseError(sonic_err);
+        assert!(gateway_err.to_string().contains("parse error"));
     }
 
     #[test]

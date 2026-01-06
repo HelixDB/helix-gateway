@@ -4,7 +4,7 @@
 //! incoming requests to gRPC calls and formatting responses.
 
 use axum::{
-    extract::State,
+    extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
@@ -17,8 +17,10 @@ use crate::{
     config::Config,
     error::GatewayError,
     format::Format,
+    gateway::queries::Queries,
     generated::gateway_proto::{HealthRequest, HealthResponse, QueryRequest, QueryResponse},
 };
+use pbjson_types::Struct;
 
 /// Shared application state available to all request handlers.
 #[derive(Clone)]
@@ -26,6 +28,7 @@ pub struct AppState {
     config: Config,
     grpc_client: ProtoClient,
     format: Format,
+    queries: Queries,
 }
 
 impl AppState {
@@ -34,6 +37,7 @@ impl AppState {
             config: Config::default(),
             grpc_client: client,
             format: Format::default(),
+            queries: Queries::default(),
         }
     }
 
@@ -46,24 +50,38 @@ impl AppState {
         self.format = format;
         self
     }
+
+    pub fn with_queries(mut self, queries: Queries) -> Self {
+        self.queries = queries;
+        self
+    }
 }
 
 /// Creates the router with all gateway endpoints.
 pub fn create_router() -> Router<AppState> {
     Router::new()
-        .route("/query", post(handle_query))
+        .route("/{query}", post(handle_query))
         .route("/health", get(handle_health))
 }
 
-/// Handles `POST /query` requests by forwarding to the backend Query RPC.
+/// Handles `POST /{query}` requests by forwarding to the backend Query RPC.
 pub async fn handle_query(
+    Path(query): Path<String>,
     State(state): State<AppState>,
     body: Bytes,
 ) -> Result<impl IntoResponse, GatewayError> {
-    let request: QueryRequest = state
-        .format
-        .deserialize_owned(&body)
-        .map_err(GatewayError::from)?;
+    let db_query = state
+        .queries
+        .get(&query)
+        .map_err(|_| GatewayError::QueryNotFound)?;
+
+    let parameters: Struct = sonic_rs::from_slice(&body)?;
+
+    let request = QueryRequest {
+        request_type: db_query.request_type,
+        query,
+        parameters: Some(parameters),
+    };
 
     let mut client = state.grpc_client.client();
     let response = client.query(request).await?.into_inner();
@@ -104,6 +122,8 @@ pub async fn handle_health(
 
 #[cfg(test)]
 mod tests {
+    use pbjson_types::{value::Kind, Value};
+
     use super::*;
 
     #[test]
@@ -138,13 +158,19 @@ mod tests {
 
     #[test]
     fn test_query_request_with_parameters() {
-        let json = r#"{"request_type": 1, "query": "create_user", "parameters": {"name": "Alice"}}"#;
+        let json =
+            r#"{"request_type": 1, "query": "create_user", "parameters": {"name": "Alice"}}"#;
         let format = Format::Json;
         let result: Result<QueryRequest, _> = format.deserialize_owned(json.as_bytes());
         assert!(result.is_ok());
         let request = result.unwrap();
         assert_eq!(request.query, "create_user");
-        assert_eq!(request.parameters.get("name"), Some(&"Alice".to_string()));
+        assert_eq!(
+            request.parameters.as_ref().unwrap().fields.get("name"),
+            Some(&Value {
+                kind: Some(Kind::StringValue("Alice".to_string())),
+            })
+        );
     }
 
     #[test]

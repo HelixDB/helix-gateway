@@ -3,6 +3,7 @@
 //! These tests spin up a mock gRPC backend server and test the full
 //! HTTP-to-gRPC translation flow.
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::Duration;
 
@@ -12,6 +13,7 @@ use axum::Router;
 use bytes::Bytes;
 use helix_gateway::config::Config;
 use helix_gateway::format::Format;
+use helix_gateway::gateway::queries::{DbQuery, Queries};
 use helix_gateway::gateway::routes::{create_router, AppState};
 use helix_gateway::generated::gateway_proto::backend_service_server::{
     BackendService, BackendServiceServer,
@@ -77,9 +79,7 @@ impl BackendService for MockBackendService {
 }
 
 /// Starts a mock gRPC server and returns the address and a shutdown signal sender.
-async fn start_mock_grpc_server(
-    service: MockBackendService,
-) -> (SocketAddr, oneshot::Sender<()>) {
+async fn start_mock_grpc_server(service: MockBackendService) -> (SocketAddr, oneshot::Sender<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
@@ -104,6 +104,30 @@ async fn start_mock_grpc_server(
     (addr, shutdown_tx)
 }
 
+/// Creates a test DbQuery with default values.
+fn test_query(request_type: i32) -> DbQuery {
+    DbQuery {
+        request_type,
+        parameters: pbjson_types::Struct::default(),
+        return_types: pbjson_types::Struct::default(),
+        is_embedding: false,
+        is_mcp: false,
+    }
+}
+
+/// Creates test queries for integration tests.
+fn create_test_queries() -> Queries {
+    let mut map = HashMap::new();
+    // Add test queries used by the integration tests
+    map.insert("query".to_string(), test_query(0));
+    map.insert("get_users".to_string(), test_query(0));
+    map.insert("get_user_by_id".to_string(), test_query(0));
+    for i in 0..10 {
+        map.insert(format!("test_query_{}", i), test_query(0));
+    }
+    Queries::from_map(map)
+}
+
 /// Creates an AppState connected to the given gRPC backend address.
 async fn create_test_app_state(backend_addr: &str) -> AppState {
     let client = helix_gateway::client::ProtoClient::connect(backend_addr)
@@ -113,6 +137,7 @@ async fn create_test_app_state(backend_addr: &str) -> AppState {
     AppState::new(client)
         .with_config(Config::default())
         .with_format(Format::Json)
+        .with_queries(create_test_queries())
 }
 
 /// Helper to make a request to the test router.
@@ -253,12 +278,13 @@ async fn test_query_endpoint_backend_error() {
 // ============================================================================
 
 #[tokio::test]
-async fn test_unknown_route_returns_404() {
+async fn test_unknown_query_returns_404() {
     let (addr, _shutdown) = start_mock_grpc_server(MockBackendService::new()).await;
     let state = create_test_app_state(&format!("http://{}", addr)).await;
     let router = create_router().with_state(state);
 
-    let (status, _) = make_request(router, "GET", "/unknown", None).await;
+    // POST to an unknown query should return 404
+    let (status, _) = make_request(router, "POST", "/unknown_query", Some("{}")).await;
 
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
@@ -327,7 +353,10 @@ async fn test_concurrent_requests() {
             let state = state.clone();
             tokio::spawn(async move {
                 let router = create_router().with_state(state);
-                let body = format!(r#"{{"request_type": 0, "query": "test_query_{}", "parameters": {{}}}}"#, i);
+                let body = format!(
+                    r#"{{"request_type": 0, "query": "test_query_{}", "parameters": {{}}}}"#,
+                    i
+                );
                 let (status, _) = make_request(router, "POST", "/query", Some(&body)).await;
                 status
             })

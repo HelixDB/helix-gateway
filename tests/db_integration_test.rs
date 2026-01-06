@@ -3,7 +3,6 @@
 //! These tests verify the handler registration system, routing logic,
 //! and gRPC service behavior of the db module.
 
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::Duration;
 
@@ -116,7 +115,7 @@ async fn test_db_service_read_query_success() {
     let request = Request::new(QueryRequest {
         request_type: RequestType::Read as i32,
         query: "test_read".to_string(),
-        parameters: HashMap::new(),
+        parameters: None,
     });
 
     let response = service.query(request).await.unwrap();
@@ -133,7 +132,7 @@ async fn test_db_service_read_query_unknown_handler() {
     let request = Request::new(QueryRequest {
         request_type: RequestType::Read as i32,
         query: "nonexistent_handler".to_string(),
-        parameters: HashMap::new(),
+        parameters: None,
     });
 
     let result = service.query(request).await;
@@ -153,7 +152,7 @@ async fn test_db_service_write_query_success() {
     let request = Request::new(QueryRequest {
         request_type: RequestType::Write as i32,
         query: "test_write".to_string(),
-        parameters: HashMap::new(),
+        parameters: None,
     });
 
     let response = service.query(request).await.unwrap();
@@ -172,7 +171,7 @@ async fn test_db_service_write_handler_not_in_read_routes() {
     let request = Request::new(QueryRequest {
         request_type: RequestType::Read as i32,
         query: "test_write".to_string(),
-        parameters: HashMap::new(),
+        parameters: None,
     });
 
     let result = service.query(request).await;
@@ -192,7 +191,7 @@ async fn test_db_service_mcp_query_success() {
     let request = Request::new(QueryRequest {
         request_type: RequestType::Mcp as i32,
         query: "test_mcp".to_string(),
-        parameters: HashMap::new(),
+        parameters: None,
     });
 
     let response = service.query(request).await.unwrap();
@@ -211,7 +210,7 @@ async fn test_db_service_mcp_handler_not_in_read_routes() {
     let request = Request::new(QueryRequest {
         request_type: RequestType::Read as i32,
         query: "test_mcp".to_string(),
-        parameters: HashMap::new(),
+        parameters: None,
     });
 
     let result = service.query(request).await;
@@ -231,7 +230,7 @@ async fn test_db_service_handler_error_returns_internal_status() {
     let request = Request::new(QueryRequest {
         request_type: RequestType::Read as i32,
         query: "test_error".to_string(),
-        parameters: HashMap::new(),
+        parameters: None,
     });
 
     let result = service.query(request).await;
@@ -304,7 +303,7 @@ async fn test_db_service_grpc_server_query() {
         .query(QueryRequest {
             request_type: RequestType::Read as i32,
             query: "test_read".to_string(),
-            parameters: HashMap::new(),
+            parameters: None,
         })
         .await
         .unwrap();
