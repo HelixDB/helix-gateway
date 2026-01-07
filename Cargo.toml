@@ -2,6 +2,9 @@
 name = "helix-gateway"
 version = "0.1.0"
 edition = "2024"
+description = "Gateway library for handling requests between gateway service and db"
+license = "MIT"
+authors = ["HelixDB <founders@helix-db.com>"]
 
 [dependencies]
 axum = "0.8.8"
