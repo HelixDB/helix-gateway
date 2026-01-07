@@ -11,8 +11,9 @@ use crate::{
     gateway::{
         embeddings::{self, EmbeddingClientPool},
         introspection::Introspection,
+        mcp::{McpStateManager, ToolArgs},
     },
-    generated::gateway_proto::{HealthRequest, HealthResponse, QueryRequest, QueryResponse},
+    generated::gateway_proto::{HealthRequest, HealthResponse, QueryRequest, QueryResponse, RequestType},
 };
 use axum::{
     Json, Router,
@@ -32,6 +33,7 @@ pub struct AppState {
     format: Format,
     introspection: Introspection,
     embedding_pool: EmbeddingClientPool,
+    mcp_state: Option<McpStateManager>,
 }
 
 impl AppState {
@@ -42,6 +44,7 @@ impl AppState {
             format: Format::default(),
             introspection: Introspection::default(),
             embedding_pool: EmbeddingClientPool::default(),
+            mcp_state: None,
         }
     }
 
@@ -62,6 +65,11 @@ impl AppState {
 
     pub fn with_embedding_pool(mut self, pool: EmbeddingClientPool) -> Self {
         self.embedding_pool = pool;
+        self
+    }
+
+    pub fn with_mcp_state(mut self, mcp_state: McpStateManager) -> Self {
+        self.mcp_state = Some(mcp_state);
         self
     }
 }
@@ -86,7 +94,77 @@ pub async fn handle_query(
         .ok_or(())
         .map_err(|_| GatewayError::QueryNotFound)?;
 
-    let parameters: Struct = sonic_rs::from_slice(&body)?;
+    let mut parameters: Struct = sonic_rs::from_slice(&body)?;
+
+    // Handle MCP requests: lookup/update Redis state, build steps array
+    if db_query.request_type == RequestType::Mcp {
+        if let Some(ref mcp_state) = state.mcp_state {
+            // Extract connection_id from request parameters
+            let connection_id = extract_string(&parameters, "connection_id")
+                .ok_or_else(|| GatewayError::InvalidRequest("missing connection_id".into()))?;
+
+            // Extract new step from request parameters
+            let new_step: ToolArgs = extract_tool(&parameters)
+                .ok_or_else(|| GatewayError::InvalidRequest("missing or invalid tool".into()))?;
+
+            // Get existing state (or create new if connection_id is new)
+            let mut conn_state = mcp_state.get_or_create(&connection_id).await?;
+
+            // Append new step to the chain
+            conn_state.add_step(new_step);
+
+            // Serialize steps array for sending to DB
+            let steps_json = serde_json::to_string(&conn_state.steps)
+                .map_err(|e| GatewayError::InvalidRequest(format!("serialize error: {}", e)))?;
+
+            // Replace parameters with connection_id and full steps array
+            parameters.fields.clear();
+            parameters.fields.insert(
+                "connection_id".to_string(),
+                pbjson_types::Value {
+                    kind: Some(pbjson_types::value::Kind::StringValue(connection_id.clone())),
+                },
+            );
+            parameters.fields.insert(
+                "steps".to_string(),
+                pbjson_types::Value {
+                    kind: Some(pbjson_types::value::Kind::StringValue(steps_json)),
+                },
+            );
+
+            // Send to DB
+            let request = QueryRequest {
+                request_type: db_query.request_type as i32,
+                query,
+                parameters: Some(parameters),
+                embeddings: None, // No embeddings for MCP
+            };
+
+            let mut client = state.grpc_client.client();
+            let response = client.query(request).await?.into_inner();
+
+            // Save updated state to Redis after successful response
+            mcp_state.save_state(&conn_state).await?;
+
+            let http_response = QueryResponse {
+                data: response.data,
+                status: response.status,
+            };
+
+            let body = state.format.serialize(&http_response)?;
+
+            return Ok((
+                StatusCode::OK,
+                [(
+                    axum::http::header::CONTENT_TYPE,
+                    state.format.content_type(),
+                )],
+                body,
+            ));
+        } else {
+            return Err(GatewayError::InvalidRequest("MCP not enabled (Redis unavailable)".into()));
+        }
+    }
 
     // Handle embeddings using batched API for better throughput
     let mut embeddings = None;
@@ -144,6 +222,27 @@ pub async fn handle_query(
         )],
         body,
     ))
+}
+
+/// Extracts a string value from a Struct field.
+fn extract_string(params: &Struct, key: &str) -> Option<String> {
+    params.fields.get(key).and_then(|v| {
+        if let Some(pbjson_types::value::Kind::StringValue(s)) = &v.kind {
+            Some(s.clone())
+        } else {
+            None
+        }
+    })
+}
+
+/// Extracts and deserializes a ToolArgs from the "tool" field.
+fn extract_tool(params: &Struct) -> Option<ToolArgs> {
+    params.fields.get("tool").and_then(|v| {
+        // The tool field should be a struct that we can serialize back to JSON
+        // and then deserialize as ToolArgs
+        let json = serde_json::to_string(&v).ok()?;
+        serde_json::from_str(&json).ok()
+    })
 }
 
 /// Inserts the embedding vector into the parameters struct.

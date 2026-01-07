@@ -27,6 +27,9 @@ pub enum GatewayError {
     #[error("embedding error: {0}")]
     EmbeddingError(String),
 
+    #[error("Redis error: {0}")]
+    RedisError(String),
+
     #[error("gRPC error: {0}")]
     Grpc(#[from] tonic::Status),
 
@@ -53,6 +56,7 @@ impl IntoResponse for GatewayError {
             GatewayError::BackendUnavailable => StatusCode::SERVICE_UNAVAILABLE,
             GatewayError::InternalError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             GatewayError::EmbeddingError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            GatewayError::RedisError(_) => StatusCode::SERVICE_UNAVAILABLE,
         };
 
         let message = self.to_string();

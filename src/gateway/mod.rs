@@ -13,7 +13,7 @@ use axum::{Router, http::StatusCode};
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
-use tracing::info;
+use tracing::{info, warn};
 
 pub mod embeddings;
 pub mod introspection;
@@ -74,11 +74,27 @@ pub async fn run() -> eyre::Result<()> {
         required_providers.local_urls.len()
     );
 
-    let state = AppState::new(grpc_client)
+    // Initialize MCP state manager (Redis connection)
+    let mcp_state = match mcp::McpStateManager::new(&config.redis).await {
+        Ok(state) => {
+            info!("Connected to Redis at {} for MCP state", config.redis.url);
+            Some(state)
+        }
+        Err(e) => {
+            warn!("Failed to connect to Redis, MCP disabled: {}", e);
+            None
+        }
+    };
+
+    let mut state = AppState::new(grpc_client)
         .with_config(config.clone())
         .with_format(Format::Json)
         .with_introspection(introspection)
         .with_embedding_pool(embedding_pool);
+
+    if let Some(mcp) = mcp_state {
+        state = state.with_mcp_state(mcp);
+    }
 
     let app: Router = create_router()
         .layer(TimeoutLayer::with_status_code(

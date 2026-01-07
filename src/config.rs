@@ -3,6 +3,42 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
+/// Redis configuration for MCP connection state storage.
+///
+/// # Environment Variables
+///
+/// - `REDIS_URL` - Redis connection URL (default: `redis://127.0.0.1:6379`)
+/// - `MCP_TTL_SECS` - MCP connection TTL in seconds (default: `3600`)
+#[derive(Clone, Debug)]
+pub struct RedisConfig {
+    /// Redis connection URL
+    pub url: String,
+    /// MCP connection TTL in seconds
+    pub mcp_ttl_secs: u64,
+}
+
+impl Default for RedisConfig {
+    fn default() -> Self {
+        Self {
+            url: "redis://127.0.0.1:6379".into(),
+            mcp_ttl_secs: 3600,
+        }
+    }
+}
+
+impl RedisConfig {
+    /// Loads Redis configuration from environment variables, falling back to defaults.
+    pub fn from_env() -> Self {
+        Self {
+            url: std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".into()),
+            mcp_ttl_secs: std::env::var("MCP_TTL_SECS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(3600),
+        }
+    }
+}
+
 /// gRPC client configuration for backend connections.
 ///
 /// Controls connection behavior, timeouts, and HTTP/2 settings.
@@ -107,6 +143,7 @@ pub struct Config {
     pub listen_addr: SocketAddr,
     pub request_timeout_ms: u64,
     pub grpc: GrpcConfig,
+    pub redis: RedisConfig,
 }
 
 impl Default for Config {
@@ -117,6 +154,7 @@ impl Default for Config {
                 .expect("Invalid default listen address"),
             request_timeout_ms: 30_000,
             grpc: GrpcConfig::default(),
+            redis: RedisConfig::default(),
         }
     }
 }
@@ -134,6 +172,7 @@ impl Config {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(30_000),
             grpc: GrpcConfig::from_env(),
+            redis: RedisConfig::from_env(),
         }
     }
 }

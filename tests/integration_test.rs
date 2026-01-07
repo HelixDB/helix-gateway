@@ -19,7 +19,7 @@ use helix_gateway::generated::gateway_proto::backend_service_server::{
     BackendService, BackendServiceServer,
 };
 use helix_gateway::generated::gateway_proto::{
-    HealthRequest, HealthResponse, QueryRequest, QueryResponse,
+    HealthRequest, HealthResponse, QueryRequest, QueryResponse, RequestType,
 };
 use http_body_util::BodyExt;
 use tokio::net::TcpListener;
@@ -105,13 +105,12 @@ async fn start_mock_grpc_server(service: MockBackendService) -> (SocketAddr, one
 }
 
 /// Creates a test DbQuery with default values.
-fn test_query(request_type: i32) -> DbQuery {
+fn test_query(request_type: RequestType) -> DbQuery {
     DbQuery {
         request_type,
         parameters: pbjson_types::Struct::default(),
         return_types: pbjson_types::Struct::default(),
         embedding_config: None,
-        is_mcp: false,
     }
 }
 
@@ -119,11 +118,11 @@ fn test_query(request_type: i32) -> DbQuery {
 fn create_test_queries() -> Introspection {
     let mut queries = HashMap::new();
     // Add test queries used by the integration tests
-    queries.insert("query".to_string(), test_query(0));
-    queries.insert("get_users".to_string(), test_query(0));
-    queries.insert("get_user_by_id".to_string(), test_query(0));
+    queries.insert("query".to_string(), test_query(RequestType::Read));
+    queries.insert("get_users".to_string(), test_query(RequestType::Read));
+    queries.insert("get_user_by_id".to_string(), test_query(RequestType::Read));
     for i in 0..10 {
-        queries.insert(format!("test_query_{}", i), test_query(0));
+        queries.insert(format!("test_query_{}", i), test_query(RequestType::Read));
     }
     Introspection {
         queries,
