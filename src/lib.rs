@@ -30,9 +30,11 @@
 
 pub mod client;
 pub mod config;
+#[cfg(feature = "db")]
 pub mod db;
 pub mod error;
 pub mod format;
+#[cfg(feature = "gateway")]
 pub mod gateway;
 pub mod generated;
 pub mod utils;

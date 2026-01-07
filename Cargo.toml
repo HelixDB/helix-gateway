@@ -24,14 +24,14 @@ pbjson-types = "0.9.0"
 pbjson = "0.9.0"
 
 #db
-inventory = "0.3.16"
-futures = "0.3.31"
+inventory = { version = "0.3.16", optional = true }
+futures = { version = "0.3.31", optional = true }
 
 #gateway
 reqwest = { version = "0.13.1", features = [
     "json",
     "blocking",
-]}
+], optional = true}
 
 #embeddings
 rig-core = { version = "0.27", features = ["derive"] }
@@ -67,3 +67,8 @@ lto = false
 panic = "abort"
 incremental = true
 debug = 1
+
+[features]
+default = ["gateway", "db"]
+gateway = ["reqwest"]
+db = ["inventory", "futures"]
