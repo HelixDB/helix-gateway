@@ -177,10 +177,10 @@ async fn embed_batch_openai(
         .map_err(|e| GatewayError::EmbeddingError(e.to_string()))?;
 
     // Map results back to keys (embeddings are returned in order)
-    let mut result = HashMap::new();
-    for (key, (_, one_or_many)) in texts.iter().map(|(k, _)| k).zip(embeddings) {
-        let vec: Vec<f64> = one_or_many.first().vec.iter().map(|&x| x as f64).collect();
-        result.insert(key.to_string(), vec);
+    let mut result = HashMap::with_capacity(texts.len());
+    for ((key, _), (_, one_or_many)) in texts.iter().zip(embeddings) {
+        let embedding = one_or_many.into_iter().next().unwrap();
+        result.insert(key.to_string(), embedding.vec);
     }
 
     Ok(result)
@@ -215,10 +215,10 @@ async fn embed_azure(
     extract_first_embedding(embeddings)
 }
 
-async fn embed_batch_azure(
+async fn embed_batch_azure<'a>(
     pool: &EmbeddingClientPool,
     cfg: &AzureEmbeddingConfig,
-    texts: Vec<(&str, &str)>,
+    texts: Vec<(&'a str, &'a str)>,
 ) -> Result<HashMap<String, Vec<f64>>, GatewayError> {
     let client = pool.azure()?;
     let model_id = azure_model_id(cfg);
@@ -236,10 +236,10 @@ async fn embed_batch_azure(
         .await
         .map_err(|e| GatewayError::EmbeddingError(e.to_string()))?;
 
-    let mut result = HashMap::new();
-    for (key, (_, one_or_many)) in texts.iter().map(|(k, _)| k).into_iter().zip(embeddings) {
-        let vec: Vec<f64> = one_or_many.first().vec.iter().map(|&x| x as f64).collect();
-        result.insert(key.to_string(), vec);
+    let mut result = HashMap::with_capacity(texts.len());
+    for ((key, _), (_, one_or_many)) in texts.iter().zip(embeddings) {
+        let embedding = one_or_many.into_iter().next().unwrap();
+        result.insert(key.to_string(), embedding.vec);
     }
 
     Ok(result)
@@ -295,10 +295,10 @@ async fn embed_batch_gemini(
         .await
         .map_err(|e| GatewayError::EmbeddingError(e.to_string()))?;
 
-    let mut result = HashMap::new();
-    for (key, (_, one_or_many)) in texts.iter().map(|(k, _)| k).zip(embeddings) {
-        let vec: Vec<f64> = one_or_many.first().vec.iter().map(|&x| x as f64).collect();
-        result.insert(key.to_string(), vec);
+    let mut result = HashMap::with_capacity(texts.len());
+    for ((key, _), (_, one_or_many)) in texts.iter().zip(embeddings) {
+        let embedding = one_or_many.into_iter().next().unwrap();
+        result.insert(key.to_string(), embedding.vec);
     }
 
     Ok(result)
@@ -404,5 +404,6 @@ fn extract_first_embedding(
         .next()
         .ok_or_else(|| GatewayError::EmbeddingError("No embedding returned".to_string()))?;
 
-    Ok(one_or_many.first().vec.iter().map(|&x| x as f64).collect())
+    let embedding = one_or_many.into_iter().next().unwrap();
+    Ok(embedding.vec)
 }
