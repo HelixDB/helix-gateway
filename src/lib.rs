@@ -35,14 +35,15 @@ pub(crate) mod client;
 pub(crate) mod config;
 pub(crate) mod error;
 pub(crate) mod format;
-pub(crate) mod generated;
-pub(crate) mod utils;
+mod generated;
+mod utils;
 
 #[cfg(feature = "db")]
 pub mod db;
 #[cfg(feature = "gateway")]
 pub mod gateway;
 
+pub use config::{Config, GrpcConfig};
 pub use error::GatewayError;
 pub use format::Format;
 

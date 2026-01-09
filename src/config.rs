@@ -18,19 +18,19 @@ use std::time::Duration;
 #[derive(Clone, Debug)]
 pub struct GrpcConfig {
     /// Backend gRPC address
-    pub backend_addr: String,
+    pub(crate) backend_addr: String,
     /// Connection establishment timeout
-    pub connect_timeout: Duration,
+    pub(crate) connect_timeout: Duration,
     /// Per-request timeout
-    pub request_timeout: Duration,
+    pub(crate) request_timeout: Duration,
     /// TCP keepalive interval
-    pub tcp_keepalive: Duration,
+    pub(crate) tcp_keepalive: Duration,
     /// HTTP/2 keepalive ping interval
-    pub http2_keepalive_interval: Duration,
+    pub(crate) http2_keepalive_interval: Duration,
     /// HTTP/2 keepalive ping timeout
-    pub http2_keepalive_timeout: Duration,
+    pub(crate) http2_keepalive_timeout: Duration,
     /// Enable HTTP/2 adaptive flow control window
-    pub http2_adaptive_window: bool,
+    pub(crate) http2_adaptive_window: bool,
 }
 
 impl Default for GrpcConfig {
@@ -104,9 +104,9 @@ impl GrpcConfig {
 /// See [`GrpcConfig`] for gRPC-specific environment variables.
 #[derive(Clone)]
 pub struct Config {
-    pub listen_addr: SocketAddr,
-    pub request_timeout_ms: u64,
-    pub grpc: GrpcConfig,
+    pub(crate) listen_addr: SocketAddr,
+    pub(crate) request_timeout_ms: u64,
+    pub(crate) grpc: GrpcConfig,
 }
 
 impl Default for Config {
