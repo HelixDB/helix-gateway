@@ -2,6 +2,7 @@ use std::ops::Deref;
 
 /// A wrapper for a value which might be owned or borrowed
 /// The key difference from Cow, is that this doesn't require the value to implement Clone
+#[allow(unused)]
 pub enum MaybeOwned<'a, T> {
     Owned(T),
     Borrowed(&'a T),

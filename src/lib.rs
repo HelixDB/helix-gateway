@@ -6,9 +6,12 @@
 //! ## Quick Start
 //!
 //! ```no_run
+//! use helix_gateway::gateway::GatewayBuilder;
+//!
 //! #[tokio::main]
 //! async fn main() -> eyre::Result<()> {
-//!     helix_gateway::gateway::run().await
+//!     GatewayBuilder::new()
+//!        .run().await
 //! }
 //! ```
 //!
@@ -28,13 +31,20 @@
 //! - `GET /health` - Health check endpoint
 //! - `POST /mcp` - Model Context Protocol requests
 
-pub mod client;
-pub mod config;
+pub(crate) mod client;
+pub(crate) mod config;
+pub(crate) mod error;
+pub(crate) mod format;
+pub(crate) mod generated;
+pub(crate) mod utils;
+
 #[cfg(feature = "db")]
 pub mod db;
-pub mod error;
-pub mod format;
 #[cfg(feature = "gateway")]
 pub mod gateway;
-pub mod generated;
-pub mod utils;
+
+pub use error::GatewayError;
+pub use format::Format;
+
+#[cfg(test)]
+mod tests;

@@ -4,13 +4,11 @@
 //! bodies. Currently supports JSON via sonic-rs, but the abstraction allows adding
 //! other formats (e.g., MessagePack, CBOR) without changing handler code.
 
-use std::borrow::Cow;
-
-use eyre::Result;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use tokio::io::{AsyncWrite, AsyncWriteExt, BufWriter};
 
-use crate::utils::MaybeOwned;
+use crate::{GatewayError, utils::MaybeOwned};
 
 /// Supported serialization formats.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
@@ -30,9 +28,10 @@ impl std::str::FromStr for Format {
     }
 }
 
+#[allow(unused)]
 impl Format {
     /// Returns the MIME content type for this format.
-    pub fn content_type(self) -> &'static str {
+    pub(crate) fn content_type(self) -> &'static str {
         match self {
             Format::Json => "application/json",
         }
@@ -41,7 +40,10 @@ impl Format {
     /// Serialize the value to bytes.
     /// If using a zero-copy format it will return a Cow::Borrowed, with a lifetime corresponding to the value.
     /// Otherwise, it returns a Cow::Owned.
-    pub fn serialize<'a, T: Serialize>(self, val: &T) -> Result<Cow<'a, [u8]>> {
+    pub(crate) fn serialize<'a, T: Serialize>(
+        self,
+        val: &T,
+    ) -> Result<Cow<'a, [u8]>, GatewayError> {
         match self {
             Format::Json => Ok(Cow::from(sonic_rs::to_vec(val)?)),
         }
@@ -49,15 +51,18 @@ impl Format {
 
     /// Serialize the value to the supplied async writer.
     /// This will use an underlying async implementation if possible, otherwise it will buffer it
-    pub async fn serialize_to_async<T: Serialize>(
+    pub(crate) async fn serialize_to_async<T: Serialize>(
         self,
         val: &T,
         writer: &mut BufWriter<impl AsyncWrite + Unpin>,
-    ) -> Result<()> {
+    ) -> Result<(), GatewayError> {
         match self {
             Format::Json => {
                 let encoded = sonic_rs::to_vec(val)?;
-                writer.write_all(&encoded).await?;
+                writer
+                    .write_all(&encoded)
+                    .await
+                    .map_err(|e| GatewayError::InternalError(eyre::Error::from(e)));
             }
         }
         Ok(())
@@ -66,14 +71,20 @@ impl Format {
     /// Deserialize the provided value
     /// Returns a MaybeOwned::Borrowed if using a zero-copy format
     /// or a MaybeOwned::Owned otherwise
-    pub fn deserialize<'a, T: Deserialize<'a>>(self, val: &'a [u8]) -> Result<MaybeOwned<'a, T>> {
+    pub(crate) fn deserialize<'a, T: Deserialize<'a>>(
+        self,
+        val: &'a [u8],
+    ) -> Result<MaybeOwned<'a, T>, GatewayError> {
         match self {
             Format::Json => Ok(MaybeOwned::Owned(sonic_rs::from_slice::<T>(val)?)),
         }
     }
 
     /// Deserialize the provided value
-    pub fn deserialize_owned<'a, T: Deserialize<'a>>(self, val: &'a [u8]) -> Result<T> {
+    pub(crate) fn deserialize_owned<'a, T: Deserialize<'a>>(
+        self,
+        val: &'a [u8],
+    ) -> Result<T, GatewayError> {
         match self {
             Format::Json => Ok(sonic_rs::from_slice::<T>(val)?),
         }
@@ -206,7 +217,7 @@ mod tests {
         let format = Format::Json;
         let invalid_json = b"not valid json";
 
-        let result: Result<MaybeOwned<TestStruct>> = format.deserialize(invalid_json);
+        let result: Result<MaybeOwned<TestStruct>, GatewayError> = format.deserialize(invalid_json);
         assert!(result.is_err());
     }
 
@@ -236,7 +247,7 @@ mod tests {
         let format = Format::Json;
         let invalid_json = b"{invalid}";
 
-        let result: Result<TestStruct> = format.deserialize_owned(invalid_json);
+        let result: Result<TestStruct, GatewayError> = format.deserialize_owned(invalid_json);
         assert!(result.is_err());
     }
 

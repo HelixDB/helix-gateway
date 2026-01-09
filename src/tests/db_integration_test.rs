@@ -6,11 +6,11 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
+use crate::db::router::{Handler, HandlerSubmission, QueryInput, Response};
+use crate::db::{BackendServiceServer, DbService};
+use crate::generated::gateway_proto::backend_service_server::BackendService;
+use crate::generated::gateway_proto::{HealthRequest, QueryRequest, RequestType};
 use futures::future::BoxFuture;
-use helix_gateway::db::router::{Handler, HandlerSubmission, QueryInput, Response};
-use helix_gateway::db::{BackendServiceServer, DbService};
-use helix_gateway::generated::gateway_proto::backend_service_server::BackendService;
-use helix_gateway::generated::gateway_proto::{HealthRequest, QueryRequest, RequestType};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tonic::Request;
@@ -282,7 +282,7 @@ async fn start_db_grpc_server() -> (SocketAddr, oneshot::Sender<()>) {
 
 #[tokio::test]
 async fn test_db_service_grpc_server_health() {
-    use helix_gateway::generated::gateway_proto::backend_service_client::BackendServiceClient;
+    use crate::generated::gateway_proto::backend_service_client::BackendServiceClient;
 
     let (addr, _shutdown) = start_db_grpc_server().await;
 
@@ -298,7 +298,7 @@ async fn test_db_service_grpc_server_health() {
 
 #[tokio::test]
 async fn test_db_service_grpc_server_query() {
-    use helix_gateway::generated::gateway_proto::backend_service_client::BackendServiceClient;
+    use crate::generated::gateway_proto::backend_service_client::BackendServiceClient;
 
     let (addr, _shutdown) = start_db_grpc_server().await;
 

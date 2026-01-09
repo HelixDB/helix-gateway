@@ -7,20 +7,20 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::Duration;
 
+use crate::config::{Config, GrpcConfig};
+use crate::format::Format;
+use crate::gateway::introspection::{DbQuery, Introspection};
+use crate::gateway::routes::{AppState, create_router};
+use crate::generated::gateway_proto::backend_service_server::{
+    BackendService, BackendServiceServer,
+};
+use crate::generated::gateway_proto::{
+    HealthRequest, HealthResponse, QueryRequest, QueryResponse, RequestType,
+};
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use bytes::Bytes;
-use helix_gateway::config::{Config, GrpcConfig};
-use helix_gateway::format::Format;
-use helix_gateway::gateway::introspection::{DbQuery, Introspection};
-use helix_gateway::gateway::routes::{AppState, create_router};
-use helix_gateway::generated::gateway_proto::backend_service_server::{
-    BackendService, BackendServiceServer,
-};
-use helix_gateway::generated::gateway_proto::{
-    HealthRequest, HealthResponse, QueryRequest, QueryResponse, RequestType,
-};
 use http_body_util::BodyExt;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -136,7 +136,7 @@ async fn create_test_app_state(backend_addr: &str) -> AppState {
         backend_addr: backend_addr.to_string(),
         ..GrpcConfig::default()
     };
-    let client = helix_gateway::client::ProtoClient::connect(&grpc_config)
+    let client = crate::client::ProtoClient::connect(&grpc_config)
         .await
         .expect("Failed to connect to mock backend");
 

@@ -13,6 +13,7 @@ use crate::{
         introspection::Introspection,
     },
     generated::gateway_proto::{HealthRequest, HealthResponse, QueryRequest, QueryResponse},
+    utils::MaybeOwned,
 };
 use axum::{
     Json, Router,
@@ -86,7 +87,7 @@ pub async fn handle_query(
         .ok_or(())
         .map_err(|_| GatewayError::QueryNotFound)?;
 
-    let parameters: Struct = sonic_rs::from_slice(&body)?;
+    let parameters: MaybeOwned<Struct> = state.format.deserialize(&body)?;
 
     // Handle embeddings using batched API for better throughput
     let mut embeddings = None;
@@ -122,7 +123,7 @@ pub async fn handle_query(
     let request = QueryRequest {
         request_type: db_query.request_type as i32,
         query,
-        parameters: Some(parameters),
+        parameters: Some(parameters.into_owned()),
         embeddings,
     };
 
