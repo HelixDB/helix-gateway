@@ -7,17 +7,6 @@ license = "MIT"
 authors = ["HelixDB <founders@helix-db.com>"]
 
 [dependencies]
-axum = "0.8.8"
-serde = { version = "1.0.228", features = ["derive"] }
-sonic-rs = "0.5.6"
-tokio = { version = "1.49.0", features = ["rt-multi-thread", "net", "macros", "signal"] }
-bytes = "1"
-thiserror = "2"
-tracing = "0.1"
-tower-http = { version = "0.6.8", features = ["trace", "timeout"] }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-eyre = "0.6.12"
-
 # proto
 tonic = "0.14.2"
 prost = "0.14"
@@ -44,8 +33,21 @@ core_affinity = "0.8.3"
 async-trait = "0.1.88"
 sha2 = "0.10.9"
 subtle = "2.6.1"
+flume = "0.12.0"
 
-
+axum = "0.8.8"
+serde = { version = "1.0.228", features = ["derive"] }
+sonic-rs = "0.5.6"
+tokio = { version = "1.49.0", features = ["rt-multi-thread", "net", "macros", "signal"] }
+bytes = "1"
+thiserror = "2"
+tracing = "0.1"
+tower-http = { version = "0.6.8", features = ["trace", "timeout"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+eyre = "0.6.12"
+crossbeam-queue = "0.3.12"
+lockfree = "0.5.1"
+tokio-retry = "0.3.0"
 
 [build-dependencies]
 tonic-prost-build = "0.14"

@@ -3,12 +3,15 @@
 //! This module defines the HTTP API surface of the gateway, translating
 //! incoming requests to gRPC calls and formatting responses.
 
+use std::{sync::Arc, time::Duration};
+
 use crate::{
     client::ProtoClient,
     config::Config,
     error::GatewayError,
     format::Format,
     gateway::{
+        buffer::Buffer,
         embeddings::{self, EmbeddingClientPool},
         introspection::Introspection,
     },
@@ -24,6 +27,8 @@ use axum::{
 };
 use bytes::Bytes;
 use pbjson_types::Struct;
+use tokio_retry::{Retry, strategy::ExponentialBackoff};
+use tonic::Code;
 
 /// Shared application state available to all request handlers.
 #[derive(Clone)]
@@ -33,6 +38,7 @@ pub struct AppState {
     format: Format,
     introspection: Introspection,
     embedding_pool: EmbeddingClientPool,
+    buffer: Arc<Buffer>,
 }
 
 impl AppState {
@@ -43,6 +49,7 @@ impl AppState {
             format: Format::default(),
             introspection: Introspection::default(),
             embedding_pool: EmbeddingClientPool::default(),
+            buffer: Arc::new(Buffer::default()),
         }
     }
 
@@ -127,8 +134,22 @@ pub async fn handle_query(
         embeddings,
     };
 
-    let mut client = state.grpc_client.client();
-    let response = client.query(request).await?.into_inner();
+    let retry_strategy = ExponentialBackoff::from_millis(100).take(3);
+    let response = match Retry::spawn(retry_strategy, async || {
+        let mut client = state.grpc_client.client();
+        client.query(request.clone()).await
+    })
+    .await
+    {
+        Ok(response) => Ok(response.into_inner()),
+        Err(err) => {
+            if matches!(err.code(), Code::Unavailable | Code::DeadlineExceeded) {
+                state.buffer.enqueue(request).unwrap().try_recv().unwrap()
+            } else {
+                Err(GatewayError::BackendUnavailable) // TODO
+            }
+        }
+    }?;
 
     let http_response = QueryResponse {
         data: response.data,
@@ -182,6 +203,37 @@ pub async fn handle_health(
     }))
 }
 
+pub async fn process_buffer(
+    state: &mut AppState,
+    grpc_client: &ProtoClient,
+) -> eyre::Result<usize> {
+    let timeout = Duration::from_millis(state.config.request_timeout_ms);
+    let mut processed = 0;
+
+    while let Some(req) = state.buffer.dequeue() {
+        // Skip if client disconnected
+        if req.is_cancelled() {
+            continue;
+        }
+
+        // Check timeout
+        if req.enqueued_at.elapsed() > timeout {
+            let _ = req.respond(Err(GatewayError::RequestTimeout));
+            continue;
+        }
+
+        // Process and send response
+        let response = match grpc_client.client().query(req.request.clone()).await {
+            Ok(response) => Ok(response.into_inner()),
+            Err(err) => Err(GatewayError::InternalError(eyre::eyre!(err))),
+        };
+
+        let _ = req.respond(response);
+        processed += 1;
+    }
+
+    Ok(processed)
+}
 #[cfg(test)]
 mod tests {
     use pbjson_types::{Value, value::Kind};

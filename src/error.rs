@@ -3,9 +3,9 @@
 //! All errors are automatically converted to appropriate HTTP responses
 //! with JSON error bodies.
 
+use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use serde::Serialize;
 use thiserror::Error;
 
@@ -35,6 +35,9 @@ pub enum GatewayError {
 
     #[error("Internal server error")]
     InternalError(#[from] eyre::Error),
+
+    #[error("Request Timeout")]
+    RequestTimeout,
 }
 
 #[derive(Serialize)]
@@ -53,6 +56,7 @@ impl IntoResponse for GatewayError {
             GatewayError::BackendUnavailable => StatusCode::SERVICE_UNAVAILABLE,
             GatewayError::InternalError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             GatewayError::EmbeddingError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            GatewayError::RequestTimeout => StatusCode::REQUEST_TIMEOUT,
         };
 
         let message = self.to_string();

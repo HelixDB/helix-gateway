@@ -15,6 +15,7 @@ use tokio::net::TcpListener;
 use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
 use tracing::info;
 
+pub mod buffer;
 pub mod embeddings;
 pub mod introspection;
 pub mod mcp;
@@ -23,6 +24,7 @@ pub mod routes;
 pub struct GatewayBuilder {
     config: config::Config,
     format: Format,
+    state: Option<AppState>,
 }
 
 impl GatewayBuilder {
@@ -33,6 +35,7 @@ impl GatewayBuilder {
         Self {
             config: config::Config::from_env(),
             format: Format::default(),
+            state: None,
         }
     }
 
@@ -43,6 +46,11 @@ impl GatewayBuilder {
 
     pub fn config(mut self, config: config::Config) -> Self {
         self.config = config;
+        self
+    }
+
+    pub fn state(mut self, state: AppState) -> Self {
+        self.state = Some(state);
         self
     }
 

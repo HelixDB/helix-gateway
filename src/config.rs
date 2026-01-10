@@ -107,6 +107,7 @@ pub struct Config {
     pub(crate) listen_addr: SocketAddr,
     pub(crate) request_timeout_ms: u64,
     pub(crate) grpc: GrpcConfig,
+    pub(crate) max_qps: usize,
 }
 
 impl Default for Config {
@@ -117,6 +118,7 @@ impl Default for Config {
                 .expect("Invalid default listen address"),
             request_timeout_ms: 30_000,
             grpc: GrpcConfig::default(),
+            max_qps: 1000,
         }
     }
 }
@@ -134,6 +136,10 @@ impl Config {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(30_000),
             grpc: GrpcConfig::from_env(),
+            max_qps: std::env::var("MAX_QPS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1000),
         }
     }
 }
