@@ -1,5 +1,6 @@
 use crate::{
     GatewayError,
+    gateway::DbStatus,
     generated::gateway_proto::{QueryRequest, QueryResponse},
 };
 use lockfree::stack::Stack;
@@ -7,10 +8,12 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
     time::Duration,
 };
-use tokio::sync::oneshot;
+use tokio::sync::{
+    oneshot,
+    watch::{Receiver, Sender, error::SendError},
+};
 
 pub type BufferedResponse = Result<QueryResponse, GatewayError>;
-pub type ResponseReceiver = oneshot::Receiver<BufferedResponse>;
 
 pub struct BufferedRequest {
     pub(crate) request: QueryRequest,
@@ -40,6 +43,7 @@ pub struct Buffer {
     max_size: Option<usize>,
     max_duration: Option<Duration>,
     len: AtomicUsize,
+    watcher: (Sender<DbStatus>, Option<Receiver<DbStatus>>),
 }
 
 impl Buffer {
@@ -57,12 +61,18 @@ impl Buffer {
         self
     }
 
-    pub fn enqueue(&self, request: QueryRequest) -> Result<ResponseReceiver, GatewayError> {
+    pub fn set_watcher(mut self, watcher: (Sender<DbStatus>, Receiver<DbStatus>)) -> Self {
+        self.watcher = (watcher.0, Some(watcher.1));
+        self
+    }
+
+    pub fn enqueue(
+        &self,
+        request: QueryRequest,
+    ) -> Result<oneshot::Receiver<BufferedResponse>, GatewayError> {
         if let Some(max) = self.max_size {
             if self.len() >= max {
-                return Err(GatewayError::InternalError(eyre::eyre!(
-                    "Gateway Buffer Full"
-                )));
+                return Err(GatewayError::BufferFull);
             }
         }
 
@@ -86,6 +96,16 @@ impl Buffer {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    pub fn update_watcher(&self, status: DbStatus) -> Result<(), SendError<DbStatus>> {
+        if let Some(rx) = &self.watcher.1
+            && *rx.borrow() != status
+        {
+            self.watcher.0.send(status)
+        } else {
+            Ok(())
+        }
     }
 }
 

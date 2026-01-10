@@ -55,7 +55,7 @@ impl<DB: Send + Sync + Clone + Default + 'static> BackendService for DbService<D
         };
 
         let handler = routes
-            .get(query_key)
+            .get(query_key.as_str())
             .ok_or_else(|| Status::not_found(query_key))?;
 
         let request = QueryInput::new(req, self.db.clone());

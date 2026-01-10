@@ -1,20 +1,12 @@
-//! HTTP route handlers and application state.
+//! HTTP route handlers.
 //!
 //! This module defines the HTTP API surface of the gateway, translating
 //! incoming requests to gRPC calls and formatting responses.
 
-use std::{sync::Arc, time::Duration};
-
 use crate::{
     client::ProtoClient,
-    config::Config,
     error::GatewayError,
-    format::Format,
-    gateway::{
-        buffer::Buffer,
-        embeddings::{self, EmbeddingClientPool},
-        introspection::Introspection,
-    },
+    gateway::{DbStatus, buffer::Buffer, embeddings, state::AppState},
     generated::gateway_proto::{HealthRequest, HealthResponse, QueryRequest, QueryResponse},
     utils::MaybeOwned,
 };
@@ -26,53 +18,15 @@ use axum::{
     routing::{get, post},
 };
 use bytes::Bytes;
+use eyre::eyre;
+use governor::RateLimiter;
+use governor::clock::DefaultClock;
+use governor::state::{InMemoryState, NotKeyed};
 use pbjson_types::Struct;
+use std::{sync::Arc, time::Duration};
 use tokio_retry::{Retry, strategy::ExponentialBackoff};
 use tonic::Code;
-
-/// Shared application state available to all request handlers.
-#[derive(Clone)]
-pub struct AppState {
-    config: Config,
-    grpc_client: ProtoClient,
-    format: Format,
-    introspection: Introspection,
-    embedding_pool: EmbeddingClientPool,
-    buffer: Arc<Buffer>,
-}
-
-impl AppState {
-    pub fn new(client: ProtoClient) -> Self {
-        Self {
-            config: Config::default(),
-            grpc_client: client,
-            format: Format::default(),
-            introspection: Introspection::default(),
-            embedding_pool: EmbeddingClientPool::default(),
-            buffer: Arc::new(Buffer::default()),
-        }
-    }
-
-    pub fn with_config(mut self, config: Config) -> Self {
-        self.config = config;
-        self
-    }
-
-    pub fn with_format(mut self, format: Format) -> Self {
-        self.format = format;
-        self
-    }
-
-    pub fn with_introspection(mut self, introspection: Introspection) -> Self {
-        self.introspection = introspection;
-        self
-    }
-
-    pub fn with_embedding_pool(mut self, pool: EmbeddingClientPool) -> Self {
-        self.embedding_pool = pool;
-        self
-    }
-}
+pub type Limiter = RateLimiter<NotKeyed, InMemoryState, DefaultClock>;
 
 /// Creates the router with all gateway endpoints.
 pub fn create_router() -> Router<AppState> {
@@ -87,6 +41,12 @@ pub async fn handle_query(
     State(state): State<AppState>,
     body: Bytes,
 ) -> Result<impl IntoResponse, GatewayError> {
+    if let Some(rate_limiter) = &state.rate_limiter {
+        if rate_limiter.check().is_err() {
+            return Err(GatewayError::RateLimited);
+        }
+    }
+
     let db_query = state
         .introspection
         .queries
@@ -115,7 +75,6 @@ pub async fn handle_query(
             .collect();
 
         if !texts_to_embed.is_empty() {
-            // Single batch call for all fields (reduces API round-trips)
             let embedding_results =
                 embeddings::embed_batch(&state.embedding_pool, embedding_config, texts_to_embed)
                     .await?;
@@ -141,10 +100,25 @@ pub async fn handle_query(
     })
     .await
     {
-        Ok(response) => Ok(response.into_inner()),
+        Ok(response) => {
+            state
+                .buffer
+                .update_watcher(DbStatus::Healthy)
+                .map_err(|e| GatewayError::InternalError(eyre!(e)))?;
+
+            Ok(response.into_inner())
+        }
         Err(err) => {
             if matches!(err.code(), Code::Unavailable | Code::DeadlineExceeded) {
-                state.buffer.enqueue(request).unwrap().try_recv().unwrap()
+                state
+                    .buffer
+                    .update_watcher(DbStatus::Unhealthy)
+                    .map_err(|e| GatewayError::InternalError(eyre!(e)))?;
+                state
+                    .buffer
+                    .enqueue(request)?
+                    .await
+                    .map_err(|e| GatewayError::InternalError(eyre!(e)))?
             } else {
                 Err(GatewayError::BackendUnavailable) // TODO
             }
@@ -204,13 +178,18 @@ pub async fn handle_health(
 }
 
 pub async fn process_buffer(
-    state: &mut AppState,
+    buffer: Arc<Buffer>,
+    timeout: Duration,
     grpc_client: &ProtoClient,
+    rate_limiter: Option<Arc<Limiter>>,
 ) -> eyre::Result<usize> {
-    let timeout = Duration::from_millis(state.config.request_timeout_ms);
     let mut processed = 0;
 
-    while let Some(req) = state.buffer.dequeue() {
+    while let Some(req) = buffer.dequeue() {
+        if let Some(ref limiter) = rate_limiter {
+            limiter.until_ready().await;
+        }
+
         // Skip if client disconnected
         if req.is_cancelled() {
             continue;
@@ -223,9 +202,35 @@ pub async fn process_buffer(
         }
 
         // Process and send response
-        let response = match grpc_client.client().query(req.request.clone()).await {
-            Ok(response) => Ok(response.into_inner()),
-            Err(err) => Err(GatewayError::InternalError(eyre::eyre!(err))),
+        let retry_strategy = ExponentialBackoff::from_millis(100).take(3);
+        let response = match Retry::spawn(retry_strategy, async || {
+            let mut client = grpc_client.client();
+            client.query(req.request.clone()).await
+        })
+        .await
+        {
+            Ok(response) => {
+                buffer
+                    .update_watcher(DbStatus::Healthy)
+                    .map_err(|e| GatewayError::InternalError(eyre!(e)))?;
+
+                Ok(response.into_inner())
+            }
+            Err(err) => {
+                if matches!(err.code(), Code::Unavailable | Code::DeadlineExceeded) {
+                    buffer
+                        .update_watcher(DbStatus::Unhealthy)
+                        .map_err(|e| GatewayError::InternalError(eyre!(e)))?;
+
+                    buffer
+                        .enqueue(req.request.clone())
+                        .unwrap()
+                        .try_recv()
+                        .unwrap()
+                } else {
+                    Err(GatewayError::BackendUnavailable) // TODO
+                }
+            }
         };
 
         let _ = req.respond(response);
@@ -237,6 +242,8 @@ pub async fn process_buffer(
 #[cfg(test)]
 mod tests {
     use pbjson_types::{Value, value::Kind};
+
+    use crate::{Config, Format};
 
     use super::*;
 

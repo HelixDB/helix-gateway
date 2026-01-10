@@ -5,21 +5,31 @@ use crate::{
     config,
     format::Format,
     gateway::{
+        buffer::Buffer,
         introspection::Introspection,
-        routes::{AppState, create_router},
+        routes::{create_router, process_buffer},
+        state::AppState,
     },
 };
 use axum::{Router, http::StatusCode};
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 use tokio::net::TcpListener;
 use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
 use tracing::info;
 
-pub mod buffer;
-pub mod embeddings;
-pub mod introspection;
-pub mod mcp;
-pub mod routes;
+mod buffer;
+mod embeddings;
+pub(crate) mod introspection;
+mod mcp;
+pub(crate) mod routes;
+pub mod state;
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum DbStatus {
+    #[default]
+    Healthy,
+    Unhealthy,
+}
 
 pub struct GatewayBuilder {
     config: config::Config,
@@ -102,11 +112,21 @@ impl GatewayBuilder {
             required_providers.local_urls.len()
         );
 
-        let state = AppState::new(grpc_client)
+        let (tx, mut rx) = tokio::sync::watch::channel(DbStatus::default());
+        rx.mark_changed(); // mark changed means the first check on database request error will trigger buffer
+        let request_buffer = Arc::new(
+            Buffer::new()
+                .max_duration(Duration::from_millis(1000))
+                .max_size(1000)
+                .set_watcher((tx, rx.clone())),
+        );
+
+        let state = AppState::new(grpc_client.clone())
             .with_config(self.config.clone())
             .with_format(self.format)
             .with_introspection(introspection)
-            .with_embedding_pool(embedding_pool);
+            .with_embedding_pool(embedding_pool)
+            .with_buffer(Arc::clone(&request_buffer));
 
         let app: Router = create_router()
             .layer(TimeoutLayer::with_status_code(
@@ -114,7 +134,29 @@ impl GatewayBuilder {
                 Duration::from_millis(self.config.request_timeout_ms),
             ))
             .layer(TraceLayer::new_for_http())
-            .with_state(state);
+            .with_state(state.clone());
+
+        let request_timeout = Duration::from_millis(state.config.request_timeout_ms);
+        let limiter = state
+            .rate_limiter
+            .as_ref()
+            .map(|limiter| Arc::clone(&limiter));
+
+        let _ = tokio::spawn(async move {
+            let _ = rx.changed().await;
+
+            // wait for db to become healthy
+            // TODO
+
+            // process pending requests
+            process_buffer(
+                Arc::clone(&request_buffer),
+                request_timeout,
+                &grpc_client,
+                limiter,
+            )
+            .await
+        });
 
         let listener = TcpListener::bind(self.config.listen_addr).await?;
         info!("Listening on {}", self.config.listen_addr);

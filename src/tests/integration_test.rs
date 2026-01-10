@@ -10,7 +10,8 @@ use std::time::Duration;
 use crate::config::{Config, GrpcConfig};
 use crate::format::Format;
 use crate::gateway::introspection::{DbQuery, Introspection};
-use crate::gateway::routes::{AppState, create_router};
+use crate::gateway::routes::create_router;
+use crate::gateway::state::AppState;
 use crate::generated::gateway_proto::backend_service_server::{
     BackendService, BackendServiceServer,
 };

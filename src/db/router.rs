@@ -20,7 +20,7 @@ pub type Response<R> = eyre::Result<R>;
 pub(crate) type BasicHandlerFn<DB> = fn(QueryInput<DB>) -> BoxFuture<'static, Response<Vec<u8>>>;
 pub(crate) type HandlerFn<DB> =
     Arc<dyn Fn(QueryInput<DB>) -> BoxFuture<'static, Response<Vec<u8>>> + Send + Sync>;
-pub(crate) type Routes<DB> = HashMap<String, HandlerFn<DB>>;
+pub(crate) type Routes<DB> = HashMap<&'static str, HandlerFn<DB>>;
 
 pub struct QueryInput<DB> {
     pub request: QueryRequest,
@@ -89,9 +89,9 @@ impl<DB: Send + Sync + Default + 'static> Router<DB> {
     /// Creates a new DbService instance with no routes.
     pub(crate) fn new() -> Self {
         let (read_routes, write_routes, mcp_routes): (
-            HashMap<String, HandlerFn<DB>>,
-            HashMap<String, HandlerFn<DB>>,
-            HashMap<String, HandlerFn<DB>>,
+            HashMap<&'static str, HandlerFn<DB>>,
+            HashMap<&'static str, HandlerFn<DB>>,
+            HashMap<&'static str, HandlerFn<DB>>,
         ) = inventory::iter::<HandlerSubmission<DB>>.into_iter().fold(
             (HashMap::new(), HashMap::new(), HashMap::new()),
             |(mut routes, mut writes, mut mcp), submission| {
@@ -103,11 +103,11 @@ impl<DB: Send + Sync + Default + 'static> Router<DB> {
                 let func: HandlerFn<DB> = Arc::new(handler.func);
 
                 if handler.is_write {
-                    writes.insert(handler.name.to_string(), func);
+                    writes.insert(handler.name, func);
                 } else if handler.is_mcp {
-                    mcp.insert(handler.name.to_string(), func);
+                    mcp.insert(handler.name, func);
                 } else {
-                    routes.insert(handler.name.to_string(), func);
+                    routes.insert(handler.name, func);
                 }
                 (routes, writes, mcp)
             },
@@ -119,15 +119,15 @@ impl<DB: Send + Sync + Default + 'static> Router<DB> {
         }
     }
 
-    pub(crate) fn read_routes(&self) -> &HashMap<String, HandlerFn<DB>> {
+    pub(crate) fn read_routes(&self) -> &HashMap<&'static str, HandlerFn<DB>> {
         self.read_routes.as_ref().unwrap()
     }
 
-    pub(crate) fn write_routes(&self) -> &HashMap<String, HandlerFn<DB>> {
+    pub(crate) fn write_routes(&self) -> &HashMap<&'static str, HandlerFn<DB>> {
         self.write_routes.as_ref().unwrap()
     }
 
-    pub(crate) fn mcp_routes(&self) -> &HashMap<String, HandlerFn<DB>> {
+    pub(crate) fn mcp_routes(&self) -> &HashMap<&'static str, HandlerFn<DB>> {
         self.mcp_routes.as_ref().unwrap()
     }
 }

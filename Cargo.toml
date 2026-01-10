@@ -48,6 +48,7 @@ eyre = "0.6.12"
 crossbeam-queue = "0.3.12"
 lockfree = "0.5.1"
 tokio-retry = "0.3.0"
+governor = "0.10.4"
 
 [build-dependencies]
 tonic-prost-build = "0.14"

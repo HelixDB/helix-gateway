@@ -12,6 +12,12 @@ use thiserror::Error;
 /// Gateway error types with automatic HTTP status code mapping.
 #[derive(Error, Debug)]
 pub enum GatewayError {
+    #[error("rate limit exceeded")]
+    RateLimited,
+
+    #[error("buffer full")]
+    BufferFull,
+
     #[error("parse error: {0}")]
     ParseError(#[from] sonic_rs::Error),
 
@@ -57,6 +63,8 @@ impl IntoResponse for GatewayError {
             GatewayError::InternalError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             GatewayError::EmbeddingError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             GatewayError::RequestTimeout => StatusCode::REQUEST_TIMEOUT,
+            GatewayError::RateLimited => StatusCode::TOO_MANY_REQUESTS,
+            GatewayError::BufferFull => StatusCode::TOO_MANY_REQUESTS,
         };
 
         let message = self.to_string();
