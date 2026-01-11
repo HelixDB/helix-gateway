@@ -93,15 +93,14 @@ pub async fn handle_query(
         embeddings,
     };
 
-    let retry_strategy = ExponentialBackoff::from_millis(100)
-        .max_delay(Duration::from_secs(1))
-        .take(3);
-    let response = match Retry::spawn(retry_strategy, async || {
-        let mut client = state.grpc_client.client();
-        client.query(request.clone()).await
-    })
-    .await
-    {
+    // let retry_strategy = ExponentialBackoff::from_millis(100)
+    //     .max_delay(Duration::from_secs(1))
+    //     .take(3);
+    // let response = match Retry::spawn(retry_strategy, async || {
+    //     let mut client = state.grpc_client.client();
+    //     client.query(request.clone()).await
+    // })
+    let response = match state.grpc_client.client().query(request.clone()).await {
         Ok(response) => {
             state
                 .buffer

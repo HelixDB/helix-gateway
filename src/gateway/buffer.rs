@@ -1,16 +1,16 @@
+// Copyright 2026 HelixDB
+// SPDX-License-Identifier: Apache-2.0
+
 use crate::{
     GatewayError,
     gateway::DbStatus,
     generated::gateway_proto::{QueryRequest, QueryResponse},
 };
-use lockfree::stack::Stack;
-use std::{
-    sync::atomic::{AtomicUsize, Ordering},
-    time::Duration,
-};
+use flume::{Receiver as FlumeReceiver, Sender as FlumeSender};
+use std::time::Duration;
 use tokio::sync::{
     oneshot,
-    watch::{Receiver, Sender, error::SendError},
+    watch::{Receiver as WatchReceiver, Sender as WatchSender, error::SendError},
 };
 
 pub type BufferedResponse = Result<QueryResponse, GatewayError>;
@@ -37,13 +37,30 @@ impl BufferedRequest {
     }
 }
 
-#[derive(Default)]
+/// High-throughput request buffer using flume MPMC channel.
+///
+/// Uses flume instead of a lock-free stack to avoid head pointer contention
+/// at high concurrency. While this changes ordering from LIFO to FIFO,
+/// the dramatically reduced contention (separate producer/consumer pointers)
+/// results in much better latency at scale.
 pub struct Buffer {
-    queue: Stack<BufferedRequest>,
-    max_size: Option<usize>,
+    sender: FlumeSender<BufferedRequest>,
+    receiver: FlumeReceiver<BufferedRequest>,
     max_duration: Option<Duration>,
-    len: AtomicUsize,
-    watcher: (Sender<DbStatus>, Option<Receiver<DbStatus>>),
+    watcher: (WatchSender<DbStatus>, Option<WatchReceiver<DbStatus>>),
+}
+
+impl Default for Buffer {
+    fn default() -> Self {
+        // Default to unbounded channel; use max_size() to set bounds
+        let (sender, receiver) = flume::unbounded();
+        Self {
+            sender,
+            receiver,
+            max_duration: None,
+            watcher: Default::default(),
+        }
+    }
 }
 
 impl Buffer {
@@ -51,9 +68,15 @@ impl Buffer {
         Buffer::default()
     }
 
-    pub fn max_size(mut self, max_size: usize) -> Self {
-        self.max_size = Some(max_size);
-        self
+    /// Sets maximum buffer size. Creates a bounded channel.
+    pub fn max_size(self, max_size: usize) -> Self {
+        let (sender, receiver) = flume::bounded(max_size);
+        Self {
+            sender,
+            receiver,
+            max_duration: self.max_duration,
+            watcher: self.watcher,
+        }
     }
 
     pub fn max_duration(mut self, max_duration: Duration) -> Self {
@@ -61,45 +84,50 @@ impl Buffer {
         self
     }
 
-    pub fn set_watcher(mut self, watcher: (Sender<DbStatus>, Receiver<DbStatus>)) -> Self {
+    pub fn set_watcher(
+        mut self,
+        watcher: (WatchSender<DbStatus>, WatchReceiver<DbStatus>),
+    ) -> Self {
         self.watcher = (watcher.0, Some(watcher.1));
         self
     }
 
+    /// Enqueue a request. Returns a receiver for the response.
+    ///
+    /// Uses `try_send` which is non-blocking. Returns BufferFull if
+    /// the channel is at capacity.
     pub fn enqueue(
         &self,
         request: QueryRequest,
     ) -> Result<oneshot::Receiver<BufferedResponse>, GatewayError> {
-        if let Some(max) = self.max_size {
-            if self.len() >= max {
-                return Err(GatewayError::BufferFull);
-            }
-        }
-
         let (tx, rx) = oneshot::channel();
-        self.queue.push(BufferedRequest {
-            request,
-            enqueued_at: std::time::Instant::now(),
-            response_tx: tx,
-        });
-        self.len.fetch_add(1, Ordering::Relaxed);
+        self.sender
+            .try_send(BufferedRequest {
+                request,
+                enqueued_at: std::time::Instant::now(),
+                response_tx: tx,
+            })
+            .map_err(|_| GatewayError::BufferFull)?;
         Ok(rx)
     }
 
+    /// Dequeue a request. Returns None if buffer is empty.
+    ///
+    /// Uses `try_recv` which is non-blocking.
     pub fn dequeue(&self) -> Option<BufferedRequest> {
-        let item = self.queue.pop();
-        if item.is_some() {
-            self.len.fetch_sub(1, Ordering::Relaxed);
-        }
-        item
+        self.receiver.try_recv().ok()
     }
 
+    /// Returns the current number of buffered requests.
+    ///
+    /// Note: This is approximate under high concurrency but avoids
+    /// the contention of a separate atomic counter.
     pub fn len(&self) -> usize {
-        self.len.load(Ordering::Relaxed)
+        self.receiver.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        self.receiver.is_empty()
     }
 
     pub fn update_watcher(&self, status: DbStatus) -> Result<(), SendError<DbStatus>> {
@@ -190,17 +218,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_lifo_order() {
+    async fn test_fifo_order() {
         let buffer = Buffer::new();
         let _rx_a = buffer.enqueue(make_test_request("A")).unwrap();
         let _rx_b = buffer.enqueue(make_test_request("B")).unwrap();
 
-        // Stack is LIFO, so B should come out first
+        // Channel is FIFO, so A should come out first
         let first = buffer.dequeue().unwrap();
-        assert_eq!(first.request().query, "B");
+        assert_eq!(first.request().query, "A");
 
         let second = buffer.dequeue().unwrap();
-        assert_eq!(second.request().query, "A");
+        assert_eq!(second.request().query, "B");
     }
 
     #[test]

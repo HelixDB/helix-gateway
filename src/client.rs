@@ -3,58 +3,84 @@
 use crate::config::GrpcConfig;
 use crate::generated::gateway_proto::backend_service_client::BackendServiceClient;
 use eyre::Result;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tonic::transport::{Channel, Endpoint};
 
-/// A wrapper around the generated gRPC client with connection pooling via HTTP/2.
+/// Default number of connections in the pool.
+const DEFAULT_POOL_SIZE: usize = 8;
+
+/// A wrapper around the generated gRPC client with connection pooling.
 ///
-/// The client is cheaply cloneable (backed by a channel) and safe to share across tasks.
-/// HTTP/2 multiplexes many concurrent requests over a single connection efficiently.
+/// Uses multiple HTTP/2 channels in a round-robin pool to increase concurrent
+/// stream capacity. Each HTTP/2 connection has a limited number of concurrent
+/// streams (~100-256), so pooling multiple connections allows higher throughput
+/// at high concurrency.
 ///
-/// The channel is configured with:
-/// - Connection and request timeouts
-/// - TCP keepalive for connection health
-/// - HTTP/2 keepalive pings for idle connection detection
-/// - Adaptive flow control for optimal throughput
+/// The client is cheaply cloneable and safe to share across tasks.
 #[derive(Clone)]
 pub struct ProtoClient {
-    client: BackendServiceClient<Channel>,
+    inner: Arc<ProtoClientInner>,
+}
+
+struct ProtoClientInner {
+    clients: Vec<BackendServiceClient<Channel>>,
+    next: AtomicUsize,
 }
 
 impl ProtoClient {
-    /// Connects to the gRPC backend with the given configuration.
+    /// Connects to the gRPC backend with the default pool size.
     ///
-    /// The channel is configured with timeouts, keepalive, and HTTP/2 settings
-    /// from the provided [`GrpcConfig`].
+    /// Creates multiple HTTP/2 connections for better throughput at high concurrency.
     pub async fn connect(config: &GrpcConfig) -> Result<Self> {
-        let endpoint = Endpoint::from_shared(config.backend_addr.clone())?
-            // Connection establishment timeout
-            .connect_timeout(config.connect_timeout)
-            // Per-request timeout
-            .timeout(config.request_timeout)
-            // TCP keepalive for connection health
-            .tcp_keepalive(Some(config.tcp_keepalive))
-            // HTTP/2 keepalive ping interval
-            .http2_keep_alive_interval(config.http2_keepalive_interval)
-            // HTTP/2 keepalive ping timeout
-            .keep_alive_timeout(config.http2_keepalive_timeout)
-            // Send keepalive pings even when idle
-            .keep_alive_while_idle(true)
-            // Adaptive flow control window for better throughput
-            .http2_adaptive_window(config.http2_adaptive_window);
+        Self::connect_pooled(config, DEFAULT_POOL_SIZE).await
+    }
 
-        let channel = endpoint.connect().await?;
+    /// Connects to the gRPC backend with a specified pool size.
+    ///
+    /// Each connection is configured with timeouts, keepalive, and HTTP/2 settings
+    /// from the provided [`GrpcConfig`].
+    ///
+    /// # Arguments
+    /// * `config` - gRPC configuration
+    /// * `pool_size` - Number of connections to create (minimum 1)
+    pub async fn connect_pooled(config: &GrpcConfig, pool_size: usize) -> Result<Self> {
+        let pool_size = pool_size.max(1);
+        let mut clients = Vec::with_capacity(pool_size);
+
+        for _ in 0..pool_size {
+            let endpoint = Endpoint::from_shared(config.backend_addr.clone())?
+                .connect_timeout(config.connect_timeout)
+                .timeout(config.request_timeout)
+                .tcp_keepalive(Some(config.tcp_keepalive))
+                .http2_keep_alive_interval(config.http2_keepalive_interval)
+                .keep_alive_timeout(config.http2_keepalive_timeout)
+                .keep_alive_while_idle(true)
+                .http2_adaptive_window(config.http2_adaptive_window);
+
+            let channel = endpoint.connect().await?;
+            clients.push(BackendServiceClient::new(channel));
+        }
 
         Ok(Self {
-            client: BackendServiceClient::new(channel),
+            inner: Arc::new(ProtoClientInner {
+                clients,
+                next: AtomicUsize::new(0),
+            }),
         })
     }
 
-    /// Returns a cloned client for use in request handlers.
+    /// Returns a client from the pool using round-robin selection.
     ///
-    /// The clone is cheap as the underlying channel is shared. This is the
-    /// recommended way to get a client for making gRPC calls.
+    /// The clone is cheap as the underlying channel is shared.
     pub fn client(&self) -> BackendServiceClient<Channel> {
-        self.client.clone()
+        let idx = self.inner.next.fetch_add(1, Ordering::Relaxed) % self.inner.clients.len();
+        self.inner.clients[idx].clone()
+    }
+
+    /// Returns the number of connections in the pool.
+    pub fn pool_size(&self) -> usize {
+        self.inner.clients.len()
     }
 }
 
@@ -69,7 +95,10 @@ impl ProtoClient {
         // that don't make gRPC calls
         let channel = Channel::from_static("http://[::1]:1").connect_lazy();
         Self {
-            client: BackendServiceClient::new(channel),
+            inner: Arc::new(ProtoClientInner {
+                clients: vec![BackendServiceClient::new(channel)],
+                next: AtomicUsize::new(0),
+            }),
         }
     }
 }

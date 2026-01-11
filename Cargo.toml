@@ -46,7 +46,6 @@ tower-http = { version = "0.6.8", features = ["trace", "timeout"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 eyre = "0.6.12"
 crossbeam-queue = "0.3.12"
-lockfree = "0.5.1"
 tokio-retry = "0.3.0"
 governor = "0.10.4"
 
@@ -68,6 +67,7 @@ http-body-util = "0.1"
 tower = { version = "0.5", features = ["util"] }
 tokio-stream = "0.1"
 hdrhistogram = "7"
+rand = "0.9"
 
 [[bench]]
 name = "gateway_benchmark"
