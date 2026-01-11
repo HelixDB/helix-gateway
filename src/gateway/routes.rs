@@ -127,7 +127,9 @@ pub async fn handle_query(
                     .await
                     .map_err(|e| GatewayError::InternalError(eyre!(e)))?
             } else {
-                Err(GatewayError::BackendUnavailable) // TODO
+                Err(GatewayError::InternalError(eyre!(
+                    err.message().to_string()
+                )))
             }
         }
     }?;
@@ -208,14 +210,7 @@ pub async fn process_buffer(
             continue;
         }
 
-        // // Process and send response
-        // let retry_strategy = ExponentialBackoff::from_millis(100)
-        //     .max_delay(Duration::from_secs(1))
-        //     .take(3);
-        // let response = match Retry::spawn(retry_strategy, async || {
-        //     let mut client = grpc_client.client();
-        //     client.query(req.request.clone()).await
-        // })
+        // Process request - clone required for requeue capability
         let response = match grpc_client.client().query(req.request.clone()).await {
             Ok(response) => {
                 buffer
@@ -231,12 +226,13 @@ pub async fn process_buffer(
                         .map_err(|e| GatewayError::InternalError(eyre!(e)))?;
 
                     // Re-enqueue the original request (preserving response channel).
-                    // Don't await - that would deadlock the buffer processor!
                     // The watcher will trigger another process_buffer call when healthy.
                     let _ = buffer.requeue(req);
                     continue;
                 } else {
-                    Err(GatewayError::BackendUnavailable)
+                    Err(GatewayError::InternalError(eyre!(
+                        err.message().to_string()
+                    )))
                 }
             }
         };

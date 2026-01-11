@@ -3,12 +3,13 @@
 use crate::config::GrpcConfig;
 use crate::generated::gateway_proto::backend_service_client::BackendServiceClient;
 use eyre::Result;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use tonic::transport::{Channel, Endpoint};
 
 /// Default number of connections in the pool.
-const DEFAULT_POOL_SIZE: usize = 8;
+/// Sized for high throughput: 32 connections × ~100 streams = ~3200 concurrent requests.
+const DEFAULT_POOL_SIZE: usize = 32;
 
 /// A wrapper around the generated gRPC client with connection pooling.
 ///
@@ -25,7 +26,6 @@ pub struct ProtoClient {
 
 struct ProtoClientInner {
     clients: Vec<BackendServiceClient<Channel>>,
-    next: AtomicUsize,
 }
 
 impl ProtoClient {
@@ -63,18 +63,16 @@ impl ProtoClient {
         }
 
         Ok(Self {
-            inner: Arc::new(ProtoClientInner {
-                clients,
-                next: AtomicUsize::new(0),
-            }),
+            inner: Arc::new(ProtoClientInner { clients }),
         })
     }
 
-    /// Returns a client from the pool using round-robin selection.
-    ///
-    /// The clone is cheap as the underlying channel is shared.
+    /// Returns a client from the pool using thread-based selection.
+    #[inline]
     pub fn client(&self) -> BackendServiceClient<Channel> {
-        let idx = self.inner.next.fetch_add(1, Ordering::Relaxed) % self.inner.clients.len();
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        std::thread::current().id().hash(&mut hasher);
+        let idx = hasher.finish() as usize % self.inner.clients.len();
         self.inner.clients[idx].clone()
     }
 
@@ -97,7 +95,6 @@ impl ProtoClient {
         Self {
             inner: Arc::new(ProtoClientInner {
                 clients: vec![BackendServiceClient::new(channel)],
-                next: AtomicUsize::new(0),
             }),
         }
     }
