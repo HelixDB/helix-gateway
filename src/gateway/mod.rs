@@ -152,9 +152,6 @@ impl GatewayBuilder {
                     continue;
                 }
 
-                // wait for db to become healthy
-                // TODO
-
                 // process pending requests
                 let _ = process_buffer(
                     Arc::clone(&request_buffer),

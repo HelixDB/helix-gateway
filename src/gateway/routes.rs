@@ -224,9 +224,13 @@ pub async fn process_buffer(
                         .update_watcher(DbStatus::Unhealthy)
                         .map_err(|e| GatewayError::InternalError(eyre!(e)))?;
 
-                    buffer.enqueue(req.request.clone()).unwrap().await.unwrap()
+                    // Re-enqueue the original request (preserving response channel).
+                    // Don't await - that would deadlock the buffer processor!
+                    // The watcher will trigger another process_buffer call when healthy.
+                    let _ = buffer.requeue(req);
+                    continue;
                 } else {
-                    Err(GatewayError::BackendUnavailable) // TODO
+                    Err(GatewayError::BackendUnavailable)
                 }
             }
         };

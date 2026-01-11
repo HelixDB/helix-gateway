@@ -118,6 +118,16 @@ impl Buffer {
         self.receiver.try_recv().ok()
     }
 
+    /// Re-enqueue a request that was previously dequeued.
+    ///
+    /// This preserves the original response channel so the caller
+    /// waiting on the response will eventually receive it.
+    pub fn requeue(&self, request: BufferedRequest) -> Result<(), GatewayError> {
+        self.sender
+            .try_send(request)
+            .map_err(|_| GatewayError::BufferFull)
+    }
+
     /// Returns the current number of buffered requests.
     ///
     /// Note: This is approximate under high concurrency but avoids
