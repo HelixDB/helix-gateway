@@ -34,11 +34,11 @@
 //! - `GET /health` - Health check endpoint
 //! - `POST /mcp` - Model Context Protocol requests
 
-pub(crate) mod client;
-pub(crate) mod config;
+pub mod client;
+pub mod config;
 pub(crate) mod error;
-pub(crate) mod format;
-mod generated;
+pub mod format;
+pub mod generated;
 mod utils;
 
 #[cfg(feature = "db")]

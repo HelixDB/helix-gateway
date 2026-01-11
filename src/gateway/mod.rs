@@ -20,11 +20,11 @@ use tokio::net::TcpListener;
 use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
 use tracing::info;
 
-pub(crate) mod buffer;
+pub mod buffer;
 mod embeddings;
-pub(crate) mod introspection;
+pub mod introspection;
 mod mcp;
-pub(crate) mod routes;
+pub mod routes;
 pub mod state;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -146,19 +146,24 @@ impl GatewayBuilder {
             .map(|limiter| Arc::clone(&limiter));
 
         let _ = tokio::spawn(async move {
-            let _ = rx.changed().await;
+            loop {
+                let _ = rx.changed().await;
+                if *rx.borrow() == DbStatus::Unhealthy {
+                    continue;
+                }
 
-            // wait for db to become healthy
-            // TODO
+                // wait for db to become healthy
+                // TODO
 
-            // process pending requests
-            process_buffer(
-                Arc::clone(&request_buffer),
-                request_timeout,
-                &grpc_client,
-                limiter,
-            )
-            .await
+                // process pending requests
+                let _ = process_buffer(
+                    Arc::clone(&request_buffer),
+                    request_timeout,
+                    &grpc_client,
+                    limiter.clone(),
+                )
+                .await;
+            }
         });
 
         let listener = TcpListener::bind(self.config.listen_addr).await?;

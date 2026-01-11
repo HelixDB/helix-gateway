@@ -89,6 +89,12 @@ impl GrpcConfig {
                 .unwrap_or(true),
         }
     }
+
+    /// Sets the backend address.
+    pub fn with_backend_addr(mut self, addr: impl Into<String>) -> Self {
+        self.backend_addr = addr.into();
+        self
+    }
 }
 
 /// Server configuration.

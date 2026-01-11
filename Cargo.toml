@@ -60,12 +60,18 @@ opt-level = 2
 codegen-units = 1
 lto = true
 panic = "abort"
-strip = "debuginfo"
+strip = false
+debug = true
 
 [dev-dependencies]
 http-body-util = "0.1"
 tower = { version = "0.5", features = ["util"] }
 tokio-stream = "0.1"
+hdrhistogram = "7"
+
+[[bench]]
+name = "gateway_benchmark"
+harness = false
 
 [profile.dev]
 opt-level = 0

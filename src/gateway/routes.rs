@@ -203,16 +203,15 @@ pub async fn process_buffer(
             continue;
         }
 
-        // Process and send response
-        let retry_strategy = ExponentialBackoff::from_millis(100)
-            .max_delay(Duration::from_secs(1))
-            .take(3);
-        let response = match Retry::spawn(retry_strategy, async || {
-            let mut client = grpc_client.client();
-            client.query(req.request.clone()).await
-        })
-        .await
-        {
+        // // Process and send response
+        // let retry_strategy = ExponentialBackoff::from_millis(100)
+        //     .max_delay(Duration::from_secs(1))
+        //     .take(3);
+        // let response = match Retry::spawn(retry_strategy, async || {
+        //     let mut client = grpc_client.client();
+        //     client.query(req.request.clone()).await
+        // })
+        let response = match grpc_client.client().query(req.request.clone()).await {
             Ok(response) => {
                 buffer
                     .update_watcher(DbStatus::Healthy)
@@ -226,11 +225,7 @@ pub async fn process_buffer(
                         .update_watcher(DbStatus::Unhealthy)
                         .map_err(|e| GatewayError::InternalError(eyre!(e)))?;
 
-                    buffer
-                        .enqueue(req.request.clone())
-                        .unwrap()
-                        .try_recv()
-                        .unwrap()
+                    buffer.enqueue(req.request.clone()).unwrap().await.unwrap()
                 } else {
                     Err(GatewayError::BackendUnavailable) // TODO
                 }

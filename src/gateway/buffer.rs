@@ -103,13 +103,15 @@ impl Buffer {
     }
 
     pub fn update_watcher(&self, status: DbStatus) -> Result<(), SendError<DbStatus>> {
-        if let Some(rx) = &self.watcher.1
-            && *rx.borrow() != status
-        {
-            self.watcher.0.send(status)
-        } else {
-            Ok(())
-        }
+        self.watcher.0.send_if_modified(|current| {
+            if *current != status {
+                *current = status;
+                true
+            } else {
+                false
+            }
+        });
+        Ok(())
     }
 }
 
