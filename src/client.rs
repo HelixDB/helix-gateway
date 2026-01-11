@@ -59,6 +59,22 @@ impl ProtoClient {
 }
 
 #[cfg(test)]
+impl ProtoClient {
+    /// Creates a mock client for testing purposes.
+    /// The mock will fail on any actual gRPC call.
+    pub fn mock() -> Self {
+        use tonic::transport::Channel;
+        // Create a channel that points to an invalid endpoint
+        // This will fail if actually used, but allows us to test code paths
+        // that don't make gRPC calls
+        let channel = Channel::from_static("http://[::1]:1").connect_lazy();
+        Self {
+            client: BackendServiceClient::new(channel),
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

@@ -1,3 +1,6 @@
+// Copyright 2026 HelixDB
+// SPDX-License-Identifier: Apache-2.0
+
 //! # Helix Gateway
 //!
 //! An HTTP-to-gRPC gateway that translates REST API requests into gRPC calls

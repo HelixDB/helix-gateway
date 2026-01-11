@@ -1,3 +1,6 @@
+// Copyright 2026 HelixDB
+// SPDX-License-Identifier: Apache-2.0
+
 //! Gateway server initialization and lifecycle management.
 //!
 use crate::{
@@ -17,7 +20,7 @@ use tokio::net::TcpListener;
 use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
 use tracing::info;
 
-mod buffer;
+pub(crate) mod buffer;
 mod embeddings;
 pub(crate) mod introspection;
 mod mcp;
@@ -113,7 +116,7 @@ impl GatewayBuilder {
         );
 
         let (tx, mut rx) = tokio::sync::watch::channel(DbStatus::default());
-        rx.mark_changed(); // mark changed means the first check on database request error will trigger buffer
+        rx.mark_unchanged(); // mark unchanged means the first check on unavailable database request will trigger buffer
         let request_buffer = Arc::new(
             Buffer::new()
                 .max_duration(Duration::from_millis(1000))

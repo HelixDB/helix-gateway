@@ -1,3 +1,6 @@
+// Copyright 2026 HelixDB
+// SPDX-License-Identifier: Apache-2.0
+
 //! Database service implementation for the gRPC backend.
 //!
 //! This module implements the `BackendService` trait, providing handlers

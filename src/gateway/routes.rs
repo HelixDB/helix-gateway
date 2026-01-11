@@ -93,7 +93,9 @@ pub async fn handle_query(
         embeddings,
     };
 
-    let retry_strategy = ExponentialBackoff::from_millis(100).take(3);
+    let retry_strategy = ExponentialBackoff::from_millis(100)
+        .max_delay(Duration::from_secs(1))
+        .take(3);
     let response = match Retry::spawn(retry_strategy, async || {
         let mut client = state.grpc_client.client();
         client.query(request.clone()).await
@@ -202,7 +204,9 @@ pub async fn process_buffer(
         }
 
         // Process and send response
-        let retry_strategy = ExponentialBackoff::from_millis(100).take(3);
+        let retry_strategy = ExponentialBackoff::from_millis(100)
+            .max_delay(Duration::from_secs(1))
+            .take(3);
         let response = match Retry::spawn(retry_strategy, async || {
             let mut client = grpc_client.client();
             client.query(req.request.clone()).await
@@ -347,5 +351,96 @@ mod tests {
         // Proto3 defaults empty strings and maps, so this may succeed
         // Just verify it doesn't panic
         let _ = result;
+    }
+
+    // process_buffer tests
+    mod process_buffer_tests {
+        use super::*;
+        use crate::client::ProtoClient;
+        use crate::gateway::buffer::Buffer;
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        fn make_test_request(query: &str) -> QueryRequest {
+            QueryRequest {
+                request_type: 0,
+                query: query.to_string(),
+                parameters: None,
+                embeddings: None,
+            }
+        }
+
+        #[tokio::test]
+        async fn test_process_empty_buffer() {
+            let buffer = Arc::new(Buffer::new());
+            let client = ProtoClient::mock();
+
+            let result = process_buffer(buffer, Duration::from_secs(30), &client, None).await;
+
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap(), 0);
+        }
+
+        #[tokio::test]
+        async fn test_process_buffer_skips_cancelled() {
+            let buffer = Arc::new(Buffer::new());
+            let client = ProtoClient::mock();
+
+            // Enqueue a request then drop the receiver (simulating client disconnect)
+            let rx = buffer.enqueue(make_test_request("test")).unwrap();
+            drop(rx);
+
+            // Process should skip the cancelled request without making gRPC call
+            let result =
+                process_buffer(buffer.clone(), Duration::from_secs(30), &client, None).await;
+
+            assert!(result.is_ok());
+            // Cancelled requests are skipped, not counted as processed
+            assert_eq!(result.unwrap(), 0);
+        }
+
+        #[tokio::test]
+        async fn test_process_buffer_timeout_handling() {
+            let buffer = Arc::new(Buffer::new());
+            let client = ProtoClient::mock();
+
+            // Enqueue a request
+            let rx = buffer.enqueue(make_test_request("test")).unwrap();
+
+            // Process with zero timeout - request should be considered expired
+            let result = process_buffer(buffer.clone(), Duration::ZERO, &client, None).await;
+
+            assert!(result.is_ok());
+            // Timed out requests are not counted as processed
+            assert_eq!(result.unwrap(), 0);
+
+            // The receiver should get a timeout error
+            let response = rx.await;
+            assert!(response.is_ok());
+            let inner = response.unwrap();
+            assert!(matches!(inner, Err(crate::GatewayError::RequestTimeout)));
+        }
+
+        #[tokio::test]
+        async fn test_process_buffer_multiple_cancelled() {
+            let buffer = Arc::new(Buffer::new());
+            let client = ProtoClient::mock();
+
+            // Enqueue multiple requests and cancel them all
+            for i in 0..5 {
+                let rx = buffer
+                    .enqueue(make_test_request(&format!("test_{}", i)))
+                    .unwrap();
+                drop(rx);
+            }
+
+            assert_eq!(buffer.len(), 5);
+
+            let result =
+                process_buffer(buffer.clone(), Duration::from_secs(30), &client, None).await;
+
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap(), 0);
+        }
     }
 }
