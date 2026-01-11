@@ -69,10 +69,6 @@ tokio-stream = "0.1"
 hdrhistogram = "7"
 rand = "0.9"
 
-[[bench]]
-name = "gateway_benchmark"
-harness = false
-
 [profile.dev]
 opt-level = 0
 codegen-units = 256
