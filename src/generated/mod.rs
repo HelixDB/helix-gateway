@@ -1,4 +1,10 @@
+#[allow(clippy::all)]
+#[allow(warnings)]
+mod gateway;
+#[allow(clippy::all)]
+#[allow(warnings)]
+mod gateway_serde;
+
 pub mod gateway_proto {
-    tonic::include_proto!("gateway");
-    include!(concat!(env!("OUT_DIR"), "/gateway.serde.rs"));
+    pub use super::gateway::*;
 }

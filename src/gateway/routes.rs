@@ -7,7 +7,10 @@ use crate::{
     client::ProtoClient,
     error::GatewayError,
     gateway::{DbStatus, buffer::Buffer, embeddings, state::AppState},
-    generated::gateway_proto::{HealthRequest, HealthResponse, QueryRequest, QueryResponse},
+    generated::gateway_proto::{
+        HealthRequest, HealthResponse, QueryRequest, QueryResponse,
+        backend_service_client::BackendServiceClient,
+    },
     utils::MaybeOwned,
 };
 use axum::{
@@ -97,9 +100,12 @@ pub async fn handle_query(
         .max_delay(Duration::from_secs(1))
         .take(3);
 
+    // Encode once before retry loop - Bytes::clone is O(1)
+    let encoded = BackendServiceClient::<tonic::transport::Channel>::encode_query(&request);
+
     let response = match RetryIf::spawn(
         retry_strategy,
-        || async { state.grpc_client.client().query(request.clone()).await },
+        || async { state.grpc_client.client().query_encoded(encoded.clone()).await },
         |err: &tonic::Status| {
             // Only retry if NOT Unavailable or DeadlineExceeded
             !matches!(err.code(), Code::Unavailable | Code::DeadlineExceeded)
@@ -211,7 +217,7 @@ pub async fn process_buffer(
         }
 
         // Process request - clone required for requeue capability
-        let response = match grpc_client.client().query(req.request.clone()).await {
+        let response = match grpc_client.client().query(&req.request).await {
             Ok(response) => {
                 buffer
                     .update_watcher(DbStatus::Healthy)

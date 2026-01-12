@@ -307,7 +307,7 @@ async fn test_db_service_grpc_server_query() {
         .unwrap();
 
     let response = client
-        .query(QueryRequest {
+        .query(&QueryRequest {
             request_type: RequestType::Read as i32,
             query: "test_read".to_string(),
             parameters: None,
