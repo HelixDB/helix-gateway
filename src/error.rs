@@ -37,6 +37,12 @@ pub enum GatewayError {
     InternalError(#[from] eyre::Error),
 }
 
+impl From<std::io::Error> for GatewayError {
+    fn from(err: std::io::Error) -> Self {
+        GatewayError::InternalError(eyre::Error::from(err))
+    }
+}
+
 #[derive(Serialize)]
 struct ErrorResponse {
     error: String,

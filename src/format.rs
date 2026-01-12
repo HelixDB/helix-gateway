@@ -62,7 +62,7 @@ impl Format {
                 writer
                     .write_all(&encoded)
                     .await
-                    .map_err(|e| GatewayError::InternalError(eyre::Error::from(e)));
+                    .map_err(GatewayError::from)?;
             }
         }
         Ok(())
@@ -95,6 +95,7 @@ impl Format {
 mod tests {
     use super::*;
     use std::str::FromStr;
+    use std::task::{Context, Poll};
 
     #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
     struct TestStruct {
@@ -177,6 +178,50 @@ mod tests {
 
         let expected = br#"{"name":"async_test","value":99}"#;
         assert_eq!(buffer, expected);
+    }
+
+    struct FailingWriter;
+
+    impl AsyncWrite for FailingWriter {
+        fn poll_write(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            _buf: &[u8],
+        ) -> Poll<std::io::Result<usize>> {
+            Poll::Ready(Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "write failed",
+            )))
+        }
+
+        fn poll_flush(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    #[tokio::test]
+    async fn test_serialize_to_async_propagates_write_error() {
+        let format = Format::Json;
+        let test_data = TestStruct {
+            // Ensure payload exceeds the buffer capacity so tokio::io::BufWriter
+            // must attempt an underlying write.
+            name: "async_test_payload".repeat(64),
+            value: 99,
+        };
+
+        let mut writer = BufWriter::with_capacity(1, FailingWriter);
+        let result = format.serialize_to_async(&test_data, &mut writer).await;
+        assert!(matches!(result, Err(GatewayError::InternalError(_))));
     }
 
     #[test]
