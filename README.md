@@ -29,61 +29,107 @@ async fn main() -> eyre::Result<()> {
 
 The gateway loads query definitions from `introspect.json` and forwards requests to the configured gRPC backend.
 
-## DB Service Usage
+### Introspection JSON Structure
 
-Add to your `Cargo.toml`:
+The `introspect.json` file defines the available queries and their configurations:
 
-```toml
-[dependencies]
-helix-gateway = { version = "0.1", features = ["db"] }
-tonic = "0.12"
-futures = "0.3"
-inventory = "0.3"
-```
-
-### Define your database type
-
-```rust
-use std::sync::Arc;
-
-#[derive(Clone, Default)]
-pub struct MyDb {
-    pub pool: Arc<sqlx::PgPool>,
+```json
+{
+  "queries": {
+    "get_users": {
+      "request_type": "READ",
+      "parameters": {},
+      "return_types": {},
+      "embedding_config": null
+    },
+    "create_user": {
+      "request_type": "WRITE",
+      "parameters": {
+        "name": "string",
+        "email": "string"
+      },
+      "return_types": {
+        "id": "string"
+      }
+    },
+    "semantic_search": {
+      "request_type": "READ",
+      "parameters": {
+        "query_text": "string",
+        "limit": "number"
+      },
+      "return_types": {},
+      "embedding_config": {
+        "provider_config": {
+          "provider": "openai",
+          "config": {
+            "model": "text_embedding_3_large"
+          }
+        },
+        "embedded_variables": ["query_text"]
+      }
+    }
+  },
+  "schema": {}
 }
 ```
 
-### Register handlers
+#### Query Fields
 
-```rust
-use helix_gateway::db::router::{Handler, HandlerSubmission, QueryInput};
-use futures::future::BoxFuture;
+| Field | Type | Description |
+|-------|------|-------------|
+| `request_type` | `"READ"` \| `"WRITE"` \| `"MCP"` | The type of request |
+| `parameters` | object | Parameter definitions for the query |
+| `return_types` | object | Return type definitions |
+| `embedding_config` | object \| null | Optional embedding configuration for vector search |
 
-fn get_users(input: QueryInput<MyDb>) -> BoxFuture<'static, eyre::Result<Vec<u8>>> {
-    Box::pin(async move {
-        let users = sqlx::query("SELECT * FROM users")
-            .fetch_all(&*input.db.pool)
-            .await?;
-        Ok(serde_json::to_vec(&users)?)
-    })
-}
+#### Embedding Providers
 
-fn create_user(input: QueryInput<MyDb>) -> BoxFuture<'static, eyre::Result<Vec<u8>>> {
-    Box::pin(async move {
-        // Handle write operation
-        Ok(vec![])
-    })
-}
+When using vector search, configure `embedding_config` with one of these providers:
 
-// Register read handler
-inventory::submit! {
-    HandlerSubmission(Handler::new("get_users", get_users))
-}
-
-// Register write handler
-inventory::submit! {
-    HandlerSubmission(Handler::new("create_user", create_user).is_write())
+**OpenAI**
+```json
+{
+  "provider": "openai",
+  "config": {
+    "model": "text_embedding_3_large"
+  }
 }
 ```
+Models: `text_embedding_3_large`, `text_embedding_3_small`, `text_embedding_ada_002`
+
+**Azure OpenAI**
+```json
+{
+  "provider": "azure",
+  "config": {
+    "model": "text_embedding_3_large",
+    "deployment_id": "your-deployment-id"
+  }
+}
+```
+
+**Gemini**
+```json
+{
+  "provider": "gemini",
+  "config": {
+    "model": "embedding_001",
+    "task_type": "RETRIEVAL_DOCUMENT"
+  }
+}
+```
+
+**Local**
+```json
+{
+  "provider": "local",
+  "config": {
+    "url": "http://localhost:8699/embed"
+  }
+}
+```
+
 
 ### Start the gRPC server
 
