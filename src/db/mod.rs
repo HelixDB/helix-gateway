@@ -7,16 +7,14 @@
 //! for Read, Write, Health, and MCP requests with async route dispatch.
 
 use crate::db::router::{QueryInput, Router};
-use crate::generated::gateway_proto::backend_service_server::BackendService;
-use crate::generated::gateway_proto::{
-    HealthRequest, HealthResponse, QueryRequest, QueryResponse, RequestType,
-};
 use tonic::{Request, Response, Status};
 
-pub mod router;
+pub(crate) mod router;
 
-// Re-export the server wrapper for easy construction
-pub use crate::generated::gateway_proto::backend_service_server::BackendServiceServer;
+pub use crate::generated::gateway_proto::{
+    HealthRequest, HealthResponse, QueryRequest, QueryResponse, RequestType,
+    backend_service_server::{BackendService, BackendServiceServer},
+};
 
 /// Database service that implements the gRPC BackendService.
 ///

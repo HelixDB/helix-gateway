@@ -130,7 +130,6 @@ Models: `text_embedding_3_large`, `text_embedding_3_small`, `text_embedding_ada_
 }
 ```
 
-
 ### Start the gRPC server
 
 ```rust

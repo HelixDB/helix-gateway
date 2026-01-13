@@ -26,19 +26,16 @@ use tonic::transport::Server;
 use tonic::{Response, Status};
 use tower::ServiceExt;
 
-use helix_gateway::config::{Config, GrpcConfig};
-use helix_gateway::format::Format;
-use helix_gateway::gateway::DbStatus;
+use helix_gateway::db::{
+    BackendService, BackendServiceServer, HealthRequest, HealthResponse, QueryRequest,
+    QueryResponse, RequestType,
+};
 use helix_gateway::gateway::buffer::Buffer;
 use helix_gateway::gateway::introspection::{DbQuery, Introspection};
 use helix_gateway::gateway::routes::{create_router, process_buffer};
 use helix_gateway::gateway::state::AppState;
-use helix_gateway::generated::gateway_proto::backend_service_server::{
-    BackendService, BackendServiceServer,
-};
-use helix_gateway::generated::gateway_proto::{
-    HealthRequest, HealthResponse, QueryRequest, QueryResponse, RequestType,
-};
+use helix_gateway::gateway::{DbStatus, ProtoClient};
+use helix_gateway::{Config, Format, GrpcConfig};
 
 // ============================================================================
 // Mock Backend Infrastructure
@@ -162,7 +159,7 @@ async fn create_test_app_state_with_buffer(
     tokio::sync::watch::Receiver<DbStatus>,
 ) {
     let grpc_config = GrpcConfig::default().with_backend_addr(backend_addr);
-    let client = helix_gateway::client::ProtoClient::connect(&grpc_config)
+    let client = ProtoClient::connect(&grpc_config)
         .await
         .expect("Failed to connect to mock backend");
 
@@ -467,9 +464,7 @@ async fn bench_chaos_resilience(workers: usize, duration_secs: u64) {
 
     // Setup gRPC client for buffer processor
     let grpc_config = GrpcConfig::default().with_backend_addr(format!("http://{}", addr));
-    let grpc_client = helix_gateway::client::ProtoClient::connect(&grpc_config)
-        .await
-        .unwrap();
+    let grpc_client = ProtoClient::connect(&grpc_config).await.unwrap();
 
     // Spawn buffer processor (like GatewayBuilder::run does)
     let buffer_for_processor = Arc::clone(&buffer);

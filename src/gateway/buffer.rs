@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    GatewayError,
+    Error,
     gateway::DbStatus,
     generated::gateway_proto::{QueryRequest, QueryResponse},
 };
@@ -13,7 +13,7 @@ use tokio::sync::{
     watch::{Receiver as WatchReceiver, Sender as WatchSender, error::SendError},
 };
 
-pub type BufferedResponse = Result<QueryResponse, GatewayError>;
+pub type BufferedResponse = Result<QueryResponse, Error>;
 
 pub struct BufferedRequest {
     pub(crate) request: QueryRequest,
@@ -99,7 +99,7 @@ impl Buffer {
     pub fn enqueue(
         &self,
         request: QueryRequest,
-    ) -> Result<oneshot::Receiver<BufferedResponse>, GatewayError> {
+    ) -> Result<oneshot::Receiver<BufferedResponse>, Error> {
         let (tx, rx) = oneshot::channel();
         self.sender
             .try_send(BufferedRequest {
@@ -107,7 +107,7 @@ impl Buffer {
                 enqueued_at: std::time::Instant::now(),
                 response_tx: tx,
             })
-            .map_err(|_| GatewayError::BufferFull)?;
+            .map_err(|_| Error::BufferFull)?;
         Ok(rx)
     }
 
@@ -122,10 +122,8 @@ impl Buffer {
     ///
     /// This preserves the original response channel so the caller
     /// waiting on the response will eventually receive it.
-    pub fn requeue(&self, request: BufferedRequest) -> Result<(), GatewayError> {
-        self.sender
-            .try_send(request)
-            .map_err(|_| GatewayError::BufferFull)
+    pub fn requeue(&self, request: BufferedRequest) -> Result<(), Error> {
+        self.sender.try_send(request).map_err(|_| Error::BufferFull)
     }
 
     /// Returns the current number of buffered requests.
@@ -221,7 +219,7 @@ mod tests {
         let rx = buffer.enqueue(make_test_request("test")).unwrap();
 
         let req = buffer.dequeue().unwrap();
-        req.respond(Err(GatewayError::BackendUnavailable)).unwrap();
+        req.respond(Err(Error::BackendUnavailable)).unwrap();
 
         let received = rx.await.unwrap();
         assert!(received.is_err());
@@ -318,7 +316,7 @@ mod tests {
 
         // At capacity, next should fail
         let result = buffer.enqueue(make_test_request("third"));
-        assert!(matches!(result, Err(GatewayError::BufferFull)));
+        assert!(matches!(result, Err(Error::BufferFull)));
     }
 
     // Concurrency stress tests

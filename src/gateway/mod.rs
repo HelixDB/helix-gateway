@@ -4,9 +4,7 @@
 //! Gateway server initialization and lifecycle management.
 //!
 use crate::{
-    client::ProtoClient,
-    config,
-    format::Format,
+    Format, config,
     gateway::{
         buffer::Buffer,
         introspection::Introspection,
@@ -26,6 +24,9 @@ pub mod introspection;
 mod mcp;
 pub mod routes;
 pub mod state;
+
+#[doc(hidden)]
+pub use crate::client::ProtoClient;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum DbStatus {

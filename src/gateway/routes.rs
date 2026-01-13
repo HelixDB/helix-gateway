@@ -4,8 +4,8 @@
 //! incoming requests to gRPC calls and formatting responses.
 
 use crate::{
+    Error,
     client::ProtoClient,
-    error::GatewayError,
     gateway::{DbStatus, buffer::Buffer, embeddings, state::AppState},
     generated::gateway_proto::{
         HealthRequest, HealthResponse, QueryRequest, QueryResponse,
@@ -43,10 +43,10 @@ pub async fn handle_query(
     Path(query): Path<String>,
     State(state): State<AppState>,
     body: Bytes,
-) -> Result<impl IntoResponse, GatewayError> {
+) -> Result<impl IntoResponse, Error> {
     if let Some(rate_limiter) = &state.rate_limiter {
         if rate_limiter.check().is_err() {
-            return Err(GatewayError::RateLimited);
+            return Err(Error::RateLimited);
         }
     }
 
@@ -55,7 +55,7 @@ pub async fn handle_query(
         .queries
         .get(&query)
         .ok_or(())
-        .map_err(|_| GatewayError::QueryNotFound)?;
+        .map_err(|_| Error::QueryNotFound)?;
 
     let parameters: MaybeOwned<Struct> = state.format.deserialize(&body)?;
 
@@ -105,7 +105,13 @@ pub async fn handle_query(
 
     let response = match RetryIf::spawn(
         retry_strategy,
-        || async { state.grpc_client.client().query_encoded(encoded.clone()).await },
+        || async {
+            state
+                .grpc_client
+                .client()
+                .query_encoded(encoded.clone())
+                .await
+        },
         |err: &tonic::Status| {
             // Only retry if NOT Unavailable or DeadlineExceeded
             !matches!(err.code(), Code::Unavailable | Code::DeadlineExceeded)
@@ -117,7 +123,7 @@ pub async fn handle_query(
             state
                 .buffer
                 .update_watcher(DbStatus::Healthy)
-                .map_err(|e| GatewayError::InternalError(eyre!(e)))?;
+                .map_err(|e| Error::InternalError(eyre!(e)))?;
 
             Ok(response.into_inner())
         }
@@ -126,16 +132,14 @@ pub async fn handle_query(
                 state
                     .buffer
                     .update_watcher(DbStatus::Unhealthy)
-                    .map_err(|e| GatewayError::InternalError(eyre!(e)))?;
+                    .map_err(|e| Error::InternalError(eyre!(e)))?;
                 state
                     .buffer
                     .enqueue(request)?
                     .await
-                    .map_err(|e| GatewayError::InternalError(eyre!(e)))?
+                    .map_err(|e| Error::InternalError(eyre!(e)))?
             } else {
-                Err(GatewayError::InternalError(eyre!(
-                    err.message().to_string()
-                )))
+                Err(Error::InternalError(eyre!(err.message().to_string())))
             }
         }
     }?;
@@ -180,9 +184,7 @@ fn insert_embedding(embeddings: &mut Option<Struct>, key: &str, embedding: Vec<f
 }
 
 /// Handles `GET /health` requests by checking backend health.
-pub async fn handle_health(
-    State(state): State<AppState>,
-) -> Result<Json<HealthResponse>, GatewayError> {
+pub async fn handle_health(State(state): State<AppState>) -> Result<Json<HealthResponse>, Error> {
     let mut client = state.grpc_client.client();
     let response = client.health(HealthRequest {}).await?.into_inner();
 
@@ -212,7 +214,7 @@ pub async fn process_buffer(
 
         // Check timeout
         if req.enqueued_at.elapsed() > timeout {
-            let _ = req.respond(Err(GatewayError::RequestTimeout));
+            let _ = req.respond(Err(Error::RequestTimeout));
             continue;
         }
 
@@ -221,7 +223,7 @@ pub async fn process_buffer(
             Ok(response) => {
                 buffer
                     .update_watcher(DbStatus::Healthy)
-                    .map_err(|e| GatewayError::InternalError(eyre!(e)))?;
+                    .map_err(|e| Error::InternalError(eyre!(e)))?;
 
                 Ok(response.into_inner())
             }
@@ -229,16 +231,14 @@ pub async fn process_buffer(
                 if matches!(err.code(), Code::Unavailable | Code::DeadlineExceeded) {
                     buffer
                         .update_watcher(DbStatus::Unhealthy)
-                        .map_err(|e| GatewayError::InternalError(eyre!(e)))?;
+                        .map_err(|e| Error::InternalError(eyre!(e)))?;
 
                     // Re-enqueue the original request (preserving response channel).
                     // The watcher will trigger another process_buffer call when healthy.
                     let _ = buffer.requeue(req);
                     continue;
                 } else {
-                    Err(GatewayError::InternalError(eyre!(
-                        err.message().to_string()
-                    )))
+                    Err(Error::InternalError(eyre!(err.message().to_string())))
                 }
             }
         };
@@ -424,7 +424,7 @@ mod tests {
             let response = rx.await;
             assert!(response.is_ok());
             let inner = response.unwrap();
-            assert!(matches!(inner, Err(crate::GatewayError::RequestTimeout)));
+            assert!(matches!(inner, Err(crate::Error::RequestTimeout)));
         }
 
         #[tokio::test]

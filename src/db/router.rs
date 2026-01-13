@@ -11,10 +11,9 @@
 //!
 //! Also all introspection queries will get handled by the gateway (will check cache first before calling from db)
 
+use crate::generated::gateway_proto::QueryRequest;
 use futures::future::BoxFuture;
 use std::{collections::HashMap, sync::Arc};
-
-use crate::generated::gateway_proto::QueryRequest;
 
 pub type Response<R> = eyre::Result<R>;
 pub(crate) type BasicHandlerFn<DB> = fn(QueryInput<DB>) -> BoxFuture<'static, Response<Vec<u8>>>;

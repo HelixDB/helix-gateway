@@ -34,11 +34,11 @@
 //! - `GET /health` - Health check endpoint
 //! - `POST /mcp` - Model Context Protocol requests
 
-pub mod client;
-pub mod config;
+pub(crate) mod client;
+pub(crate) mod config;
 pub(crate) mod error;
-pub mod format;
-pub mod generated;
+pub(crate) mod format;
+pub(crate) mod generated;
 mod utils;
 
 #[cfg(feature = "db")]
@@ -46,9 +46,11 @@ pub mod db;
 #[cfg(feature = "gateway")]
 pub mod gateway;
 
+pub use crate::generated::gateway_proto::QueryRequest;
 pub use config::{Config, GrpcConfig};
-pub use error::GatewayError;
+pub use error::GatewayError as Error;
 pub use format::Format;
+pub use gateway::DbStatus;
 
 #[cfg(test)]
 mod tests;

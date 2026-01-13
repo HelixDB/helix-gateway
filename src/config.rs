@@ -108,6 +108,7 @@ impl GrpcConfig {
 /// - `REQUEST_TIMEOUT_MS` - HTTP request timeout in milliseconds (default: `30000`)
 ///
 /// See [`GrpcConfig`] for gRPC-specific environment variables.
+#[allow(unused)]
 #[derive(Clone)]
 pub struct Config {
     pub(crate) listen_addr: SocketAddr,
