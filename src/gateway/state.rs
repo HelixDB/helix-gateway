@@ -14,10 +14,10 @@ use crate::{
 /// Shared application state available to all request handlers.
 #[derive(Clone)]
 pub struct AppState {
-    pub config: Config,
+    pub config: Arc<Config>,
     pub grpc_client: ProtoClient,
     pub format: Format,
-    pub introspection: Introspection,
+    pub introspection: Arc<Introspection>,
     pub embedding_pool: EmbeddingClientPool,
     pub buffer: Arc<Buffer>,
     pub rate_limiter: Option<Arc<Limiter>>,
@@ -26,10 +26,10 @@ pub struct AppState {
 impl AppState {
     pub fn new(client: ProtoClient) -> Self {
         Self {
-            config: Config::default(),
+            config: Arc::new(Config::default()),
             grpc_client: client,
             format: Format::default(),
-            introspection: Introspection::default(),
+            introspection: Arc::new(Introspection::default()),
             embedding_pool: EmbeddingClientPool::default(),
             buffer: Arc::new(Buffer::default()),
             rate_limiter: None,
@@ -37,7 +37,7 @@ impl AppState {
     }
 
     pub fn with_config(mut self, config: Config) -> Self {
-        self.config = config;
+        self.config = Arc::new(config);
         self
     }
 
@@ -47,7 +47,7 @@ impl AppState {
     }
 
     pub fn with_introspection(mut self, introspection: Introspection) -> Self {
-        self.introspection = introspection;
+        self.introspection = Arc::new(introspection);
         self
     }
 

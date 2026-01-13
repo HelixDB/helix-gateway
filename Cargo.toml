@@ -1,6 +1,6 @@
 [package]
 name = "helix-gateway"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 description = "Gateway library for handling requests between gateway service and db"
 license = "MIT"
