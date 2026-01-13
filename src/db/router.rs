@@ -15,7 +15,7 @@ use crate::generated::gateway_proto::QueryRequest;
 use futures::future::BoxFuture;
 use std::{collections::HashMap, sync::Arc};
 
-pub type Response<R> = eyre::Result<R>;
+pub(crate) type Response<R> = eyre::Result<R>;
 pub(crate) type BasicHandlerFn<DB> = fn(QueryInput<DB>) -> BoxFuture<'static, Response<Vec<u8>>>;
 pub(crate) type HandlerFn<DB> =
     Arc<dyn Fn(QueryInput<DB>) -> BoxFuture<'static, Response<Vec<u8>>> + Send + Sync>;
