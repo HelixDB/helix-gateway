@@ -3,6 +3,10 @@
 //! Supports OpenAI, Azure OpenAI, and Gemini via the Rig library,
 //! plus a custom local embedding service. Clients are created once at
 //! startup and reused across all requests for optimal throughput.
+//!
+//! # Environment Variables
+//!
+//! - `EMBEDDING_POOL_MAX_IDLE` - Max idle connections per host for local embedding service (default: `50`)
 
 use crate::error::GatewayError;
 use crate::gateway::introspection::{
@@ -55,9 +59,14 @@ impl EmbeddingClientPool {
 
         // Create a shared reqwest client for each unique local URL.
         // The reqwest::Client internally pools connections.
+        let pool_max_idle: usize = std::env::var("EMBEDDING_POOL_MAX_IDLE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(50);
+
         for url in &required.local_urls {
             let client = reqwest::Client::builder()
-                .pool_max_idle_per_host(10)
+                .pool_max_idle_per_host(pool_max_idle)
                 .build()
                 .map_err(|e| {
                     GatewayError::EmbeddingError(format!(

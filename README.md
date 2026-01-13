@@ -172,3 +172,9 @@ All settings are configured via environment variables with sensible defaults.
 | `GRPC_HTTP2_KEEPALIVE_INTERVAL_SECS` | `60` | HTTP/2 ping interval |
 | `GRPC_HTTP2_KEEPALIVE_TIMEOUT_SECS` | `20` | HTTP/2 ping timeout |
 | `GRPC_HTTP2_ADAPTIVE_WINDOW` | `true` | Adaptive flow control |
+
+### Embeddings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `EMBEDDING_POOL_MAX_IDLE` | `50` | Max idle connections per host for local embedding service |
