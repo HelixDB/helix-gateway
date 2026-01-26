@@ -4,7 +4,7 @@ use governor::{Quota, RateLimiter};
 
 use crate::{
     Config, Format,
-    client::ProtoClient,
+    client::RoutingClient,
     gateway::{
         buffer::Buffer, embeddings::EmbeddingClientPool, introspection::Introspection,
         routes::Limiter,
@@ -15,7 +15,7 @@ use crate::{
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<Config>,
-    pub grpc_client: ProtoClient,
+    pub routing_client: RoutingClient,
     pub format: Format,
     pub introspection: Arc<Introspection>,
     pub embedding_pool: EmbeddingClientPool,
@@ -24,10 +24,10 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(client: ProtoClient) -> Self {
+    pub fn new(client: RoutingClient) -> Self {
         Self {
             config: Arc::new(Config::default()),
-            grpc_client: client,
+            routing_client: client,
             format: Format::default(),
             introspection: Arc::new(Introspection::default()),
             embedding_pool: EmbeddingClientPool::default(),

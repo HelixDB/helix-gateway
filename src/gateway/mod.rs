@@ -26,7 +26,7 @@ pub mod routes;
 pub mod state;
 
 #[doc(hidden)]
-pub use crate::client::ProtoClient;
+pub use crate::client::{ProtoClient, RoutingClient};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum DbStatus {
@@ -91,13 +91,23 @@ impl GatewayBuilder {
             )
             .init();
 
-        let grpc_client = ProtoClient::connect(&self.config.grpc).await?;
-        info!(
-            "Connected to backend at {} (connect_timeout={:?}, request_timeout={:?})",
-            self.config.grpc.backend_addr,
-            self.config.grpc.connect_timeout,
-            self.config.grpc.request_timeout
-        );
+        let routing_client = RoutingClient::connect(&self.config.grpc).await?;
+        if routing_client.has_read_replica() {
+            info!(
+                "Connected to backends: write={}, read={} (connect_timeout={:?}, request_timeout={:?})",
+                self.config.grpc.backend_addr,
+                self.config.grpc.read_backend_addr.as_deref().unwrap_or(""),
+                self.config.grpc.connect_timeout,
+                self.config.grpc.request_timeout
+            );
+        } else {
+            info!(
+                "Connected to backend at {} (connect_timeout={:?}, request_timeout={:?})",
+                self.config.grpc.backend_addr,
+                self.config.grpc.connect_timeout,
+                self.config.grpc.request_timeout
+            );
+        }
 
         let introspection = load_queries("introspect.json")?;
         info!(
@@ -125,7 +135,7 @@ impl GatewayBuilder {
                 .set_watcher((tx, rx.clone())),
         );
 
-        let state = AppState::new(grpc_client.clone())
+        let state = AppState::new(routing_client.clone())
             .with_config(self.config.clone())
             .with_format(self.format)
             .with_introspection(introspection)
@@ -157,7 +167,7 @@ impl GatewayBuilder {
                 let _ = process_buffer(
                     Arc::clone(&request_buffer),
                     request_timeout,
-                    &grpc_client,
+                    &routing_client,
                     limiter.clone(),
                 )
                 .await;

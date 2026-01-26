@@ -137,7 +137,7 @@ async fn create_test_app_state(backend_addr: &str) -> AppState {
         backend_addr: backend_addr.to_string(),
         ..GrpcConfig::default()
     };
-    let client = crate::client::ProtoClient::connect(&grpc_config)
+    let client = crate::client::RoutingClient::connect(&grpc_config)
         .await
         .expect("Failed to connect to mock backend");
 
@@ -480,7 +480,7 @@ async fn create_test_app_state_with_buffer(
         backend_addr: backend_addr.to_string(),
         ..GrpcConfig::default()
     };
-    let client = crate::client::ProtoClient::connect(&grpc_config)
+    let client = crate::client::RoutingClient::connect(&grpc_config)
         .await
         .expect("Failed to connect to mock backend");
 
@@ -585,7 +585,7 @@ async fn test_buffer_fills_and_drains_on_db_recovery() {
         backend_addr: format!("http://{}", addr),
         ..GrpcConfig::default()
     };
-    let client = crate::client::ProtoClient::connect(&grpc_config)
+    let client = crate::client::RoutingClient::connect(&grpc_config)
         .await
         .unwrap();
 

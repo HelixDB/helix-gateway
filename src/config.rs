@@ -9,6 +9,8 @@ use std::time::Duration;
 ///
 /// # Environment Variables
 ///
+/// - `BACKEND_ADDR` - Primary backend address for write requests (default: `http://127.0.0.1:50051`)
+/// - `READ_BACKEND_ADDR` - Optional read replica address for read requests
 /// - `GRPC_CONNECT_TIMEOUT_MS` - Connection establishment timeout (default: `5000`)
 /// - `GRPC_REQUEST_TIMEOUT_MS` - Per-request timeout (default: `30000`)
 /// - `GRPC_TCP_KEEPALIVE_SECS` - TCP keepalive interval (default: `60`)
@@ -17,8 +19,10 @@ use std::time::Duration;
 /// - `GRPC_HTTP2_ADAPTIVE_WINDOW` - Enable adaptive flow control (default: `true`)
 #[derive(Clone, Debug)]
 pub struct GrpcConfig {
-    /// Backend gRPC address
+    /// Primary backend gRPC address (used for write requests)
     pub(crate) backend_addr: String,
+    /// Optional read replica address (used for read and MCP requests)
+    pub(crate) read_backend_addr: Option<String>,
     /// Connection establishment timeout
     pub(crate) connect_timeout: Duration,
     /// Per-request timeout
@@ -37,6 +41,7 @@ impl Default for GrpcConfig {
     fn default() -> Self {
         Self {
             backend_addr: "http://127.0.0.1:50051".into(),
+            read_backend_addr: None,
             connect_timeout: Duration::from_millis(5_000),
             request_timeout: Duration::from_millis(30_000),
             tcp_keepalive: Duration::from_secs(60),
@@ -53,6 +58,7 @@ impl GrpcConfig {
         Self {
             backend_addr: std::env::var("BACKEND_ADDR")
                 .unwrap_or_else(|_| "http://127.0.0.1:50051".into()),
+            read_backend_addr: std::env::var("READ_BACKEND_ADDR").ok(),
             connect_timeout: Duration::from_millis(
                 std::env::var("GRPC_CONNECT_TIMEOUT_MS")
                     .ok()
@@ -94,6 +100,17 @@ impl GrpcConfig {
     pub fn with_backend_addr(mut self, addr: impl Into<String>) -> Self {
         self.backend_addr = addr.into();
         self
+    }
+
+    /// Sets the read backend address for read replica routing.
+    pub fn with_read_backend_addr(mut self, addr: impl Into<String>) -> Self {
+        self.read_backend_addr = Some(addr.into());
+        self
+    }
+
+    /// Returns true if a separate read backend is configured.
+    pub fn has_read_replica(&self) -> bool {
+        self.read_backend_addr.is_some()
     }
 }
 
@@ -198,5 +215,20 @@ mod tests {
         assert_eq!(grpc.http2_keepalive_interval, Duration::from_secs(60));
         assert_eq!(grpc.http2_keepalive_timeout, Duration::from_secs(20));
         assert!(grpc.http2_adaptive_window);
+        assert!(grpc.read_backend_addr.is_none());
+    }
+
+    #[test]
+    fn test_grpc_config_with_read_backend() {
+        let grpc = GrpcConfig::default()
+            .with_read_backend_addr("http://replica:50051");
+        assert!(grpc.has_read_replica());
+        assert_eq!(grpc.read_backend_addr.as_deref(), Some("http://replica:50051"));
+    }
+
+    #[test]
+    fn test_grpc_config_no_read_replica_by_default() {
+        let grpc = GrpcConfig::default();
+        assert!(!grpc.has_read_replica());
     }
 }

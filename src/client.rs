@@ -2,6 +2,7 @@
 
 use crate::config::GrpcConfig;
 use crate::generated::gateway_proto::backend_service_client::BackendServiceClient;
+use crate::generated::gateway_proto::RequestType;
 use eyre::Result;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -100,6 +101,98 @@ impl ProtoClient {
     }
 }
 
+/// Routes requests to different backends based on request type.
+///
+/// Supports read replica configurations where reads go to replicas
+/// and writes go to the primary. When no read replica is configured,
+/// both clients point to the same connection pool.
+#[derive(Clone)]
+pub struct RoutingClient {
+    write_client: ProtoClient,
+    read_client: ProtoClient,
+    has_read_replica: bool,
+}
+
+impl RoutingClient {
+    /// Connects to the backend(s) based on configuration.
+    ///
+    /// If `READ_BACKEND_ADDR` is configured, creates separate connection pools
+    /// for reads and writes. Otherwise, both use the primary backend.
+    pub async fn connect(config: &GrpcConfig) -> Result<Self> {
+        let write_client = ProtoClient::connect(config).await?;
+
+        let (read_client, has_read_replica) = if let Some(ref read_addr) = config.read_backend_addr
+        {
+            let read_config = GrpcConfig {
+                backend_addr: read_addr.clone(),
+                ..config.clone()
+            };
+            (ProtoClient::connect(&read_config).await?, true)
+        } else {
+            // Share the same client for both read and write
+            (write_client.clone(), false)
+        };
+
+        Ok(Self {
+            write_client,
+            read_client,
+            has_read_replica,
+        })
+    }
+
+    /// Returns the appropriate client for the given request type.
+    ///
+    /// - `RequestType::Write` → write_client (primary)
+    /// - `RequestType::Read` → read_client (replica if configured)
+    /// - `RequestType::Mcp` → read_client (replica if configured)
+    #[inline]
+    pub fn client_for(&self, request_type: RequestType) -> &ProtoClient {
+        match request_type {
+            RequestType::Write => &self.write_client,
+            RequestType::Read | RequestType::Mcp => &self.read_client,
+        }
+    }
+
+    /// Returns the write client directly.
+    #[inline]
+    pub fn write_client(&self) -> &ProtoClient {
+        &self.write_client
+    }
+
+    /// Returns the read client directly.
+    #[inline]
+    pub fn read_client(&self) -> &ProtoClient {
+        &self.read_client
+    }
+
+    /// Returns true if a separate read replica is configured.
+    pub fn has_read_replica(&self) -> bool {
+        self.has_read_replica
+    }
+}
+
+#[cfg(test)]
+impl RoutingClient {
+    /// Creates a mock routing client for testing purposes.
+    pub fn mock() -> Self {
+        let client = ProtoClient::mock();
+        Self {
+            write_client: client.clone(),
+            read_client: client,
+            has_read_replica: false,
+        }
+    }
+
+    /// Creates a mock routing client with separate read/write clients.
+    pub fn mock_with_replica() -> Self {
+        Self {
+            write_client: ProtoClient::mock(),
+            read_client: ProtoClient::mock(),
+            has_read_replica: true,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,5 +233,40 @@ mod tests {
         let result = ProtoClient::connect(&config).await;
         // Connection to port 1 should fail (nothing listening there)
         assert!(result.is_err());
+    }
+
+    // RoutingClient tests
+    #[tokio::test]
+    async fn test_routing_client_mock_no_replica() {
+        let client = RoutingClient::mock();
+        assert!(!client.has_read_replica());
+    }
+
+    #[tokio::test]
+    async fn test_routing_client_mock_with_replica() {
+        let client = RoutingClient::mock_with_replica();
+        assert!(client.has_read_replica());
+    }
+
+    #[tokio::test]
+    async fn test_routing_client_routes_write_to_write_client() {
+        let client = RoutingClient::mock_with_replica();
+        let selected = client.client_for(RequestType::Write);
+        // Verify it's the write client by comparing pool addresses
+        assert!(std::ptr::eq(selected, client.write_client()));
+    }
+
+    #[tokio::test]
+    async fn test_routing_client_routes_read_to_read_client() {
+        let client = RoutingClient::mock_with_replica();
+        let selected = client.client_for(RequestType::Read);
+        assert!(std::ptr::eq(selected, client.read_client()));
+    }
+
+    #[tokio::test]
+    async fn test_routing_client_routes_mcp_to_read_client() {
+        let client = RoutingClient::mock_with_replica();
+        let selected = client.client_for(RequestType::Mcp);
+        assert!(std::ptr::eq(selected, client.read_client()));
     }
 }

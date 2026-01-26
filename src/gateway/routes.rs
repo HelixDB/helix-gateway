@@ -5,10 +5,10 @@
 
 use crate::{
     Error,
-    client::ProtoClient,
+    client::RoutingClient,
     gateway::{DbStatus, buffer::Buffer, embeddings, state::AppState},
     generated::gateway_proto::{
-        HealthRequest, HealthResponse, QueryRequest, QueryResponse,
+        HealthRequest, HealthResponse, QueryRequest, QueryResponse, RequestType,
         backend_service_client::BackendServiceClient,
     },
     utils::MaybeOwned,
@@ -103,11 +103,13 @@ pub async fn handle_query(
     // Encode once before retry loop - Bytes::clone is O(1)
     let encoded = BackendServiceClient::<tonic::transport::Channel>::encode_query(&request);
 
+    // Route to appropriate backend based on request type
+    let grpc_client = state.routing_client.client_for(db_query.request_type);
+
     let response = match RetryIf::spawn(
         retry_strategy,
         || async {
-            state
-                .grpc_client
+            grpc_client
                 .client()
                 .query_encoded(encoded.clone())
                 .await
@@ -185,7 +187,8 @@ fn insert_embedding(embeddings: &mut Option<Struct>, key: &str, embedding: Vec<f
 
 /// Handles `GET /health` requests by checking backend health.
 pub async fn handle_health(State(state): State<AppState>) -> Result<Json<HealthResponse>, Error> {
-    let mut client = state.grpc_client.client();
+    // Use write client (primary) for health check
+    let mut client = state.routing_client.write_client().client();
     let response = client.health(HealthRequest {}).await?.into_inner();
 
     Ok(Json(HealthResponse {
@@ -197,7 +200,7 @@ pub async fn handle_health(State(state): State<AppState>) -> Result<Json<HealthR
 pub async fn process_buffer(
     buffer: Arc<Buffer>,
     timeout: Duration,
-    grpc_client: &ProtoClient,
+    routing_client: &RoutingClient,
     rate_limiter: Option<Arc<Limiter>>,
 ) -> eyre::Result<usize> {
     let mut processed = 0;
@@ -217,6 +220,11 @@ pub async fn process_buffer(
             let _ = req.respond(Err(Error::RequestTimeout));
             continue;
         }
+
+        // Route to appropriate backend based on request type
+        let request_type = RequestType::try_from(req.request.request_type)
+            .unwrap_or(RequestType::Read);
+        let grpc_client = routing_client.client_for(request_type);
 
         // Process request - clone required for requeue capability
         let response = match grpc_client.client().query(&req.request).await {
@@ -362,7 +370,7 @@ mod tests {
     // process_buffer tests
     mod process_buffer_tests {
         use super::*;
-        use crate::client::ProtoClient;
+        use crate::client::RoutingClient;
         use crate::gateway::buffer::Buffer;
         use std::sync::Arc;
         use std::time::Duration;
@@ -379,7 +387,7 @@ mod tests {
         #[tokio::test]
         async fn test_process_empty_buffer() {
             let buffer = Arc::new(Buffer::new());
-            let client = ProtoClient::mock();
+            let client = RoutingClient::mock();
 
             let result = process_buffer(buffer, Duration::from_secs(30), &client, None).await;
 
@@ -390,7 +398,7 @@ mod tests {
         #[tokio::test]
         async fn test_process_buffer_skips_cancelled() {
             let buffer = Arc::new(Buffer::new());
-            let client = ProtoClient::mock();
+            let client = RoutingClient::mock();
 
             // Enqueue a request then drop the receiver (simulating client disconnect)
             let rx = buffer.enqueue(make_test_request("test")).unwrap();
@@ -408,7 +416,7 @@ mod tests {
         #[tokio::test]
         async fn test_process_buffer_timeout_handling() {
             let buffer = Arc::new(Buffer::new());
-            let client = ProtoClient::mock();
+            let client = RoutingClient::mock();
 
             // Enqueue a request
             let rx = buffer.enqueue(make_test_request("test")).unwrap();
@@ -430,7 +438,7 @@ mod tests {
         #[tokio::test]
         async fn test_process_buffer_multiple_cancelled() {
             let buffer = Arc::new(Buffer::new());
-            let client = ProtoClient::mock();
+            let client = RoutingClient::mock();
 
             // Enqueue multiple requests and cancel them all
             for i in 0..5 {
